@@ -1,0 +1,15 @@
+# Since AI 2026 - Turku Energia Imbalance Price Forecasting Challenge
+# Python 3.11 or newer is recommended.
+
+# Core Data Science & ML packages
+pandas>=2.2,<4
+numpy>=1.26,<3
+lightgbm>=4.0
+shap>=0.44
+jupyter>=1.0
+scikit-learn>=1.4
+
+# Starter package utilities & data loading
+pyarrow>=14
+requests>=2.31
+tzdata>=2024.1
