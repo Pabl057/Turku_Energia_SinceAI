@@ -225,18 +225,82 @@ def inject_brand_css(dark_mode: bool = True) -> str:
       }}
 
       /* Global page & typography */
-      .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {{
+      .stApp, [data-testid="stAppViewContainer"] {{
         background-color: var(--te-bg-app) !important;
         color: var(--te-text) !important;
         font-family: 'Fira Sans', 'Franklin Gothic Book', -apple-system, BlinkMacSystemFont, sans-serif;
       }}
 
-      .block-container {{
-        padding-top: 1.1rem !important;
-        padding-bottom: 2.5rem !important;
+      /* Top Header Bar — compact (48px) with vertically centered buttons */
+      header[data-testid="stHeader"] {{
+        height: 3rem !important;
+        min-height: 48px !important;
+        background: {"rgba(7, 19, 30, 0.88)" if dark_mode else "rgba(255, 255, 255, 0.92)"} !important;
+        backdrop-filter: blur(8px) !important;
+        border-bottom: 1px solid var(--te-border-subtle) !important;
+        display: flex !important;
+        align-items: center !important;
+      }}
+
+      header[data-testid="stHeader"] > div,
+      div[data-testid="stToolbar"],
+      div[data-testid="stToolbarActions"],
+      div[data-testid="stAppDeployButton"],
+      .stAppDeployButton,
+      span[data-testid="stMainMenu"] {{
+        display: inline-flex !important;
+        align-items: center !important;
+        height: 3rem !important;
+        min-height: 48px !important;
+        top: 0 !important;
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+      }}
+
+      div[data-testid="stToolbar"] {{
+        right: 1rem !important;
+        gap: 0.45rem !important;
+      }}
+
+      div[data-testid="stAppDeployButton"] button,
+      .stAppDeployButton button {{
+        height: 32px !important;
+        min-height: 32px !important;
+        padding: 0 12px !important;
+        border-radius: 999px !important;
+        border: 1px solid var(--te-border) !important;
+        background: var(--te-bg-surface) !important;
+        color: var(--te-text) !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        margin: 0 !important;
+        transition: all 0.2s ease !important;
+      }}
+
+      div[data-testid="stAppDeployButton"] button:hover,
+      .stAppDeployButton button:hover {{
+        border-color: var(--te-orange) !important;
+        background: var(--te-orange-light) !important;
+      }}
+
+      .block-container,
+      [data-testid="stMainBlockContainer"] {{
+        padding-top: calc(3rem + 6px) !important;
+        padding-bottom: 2rem !important;
         padding-left: 2rem !important;
         padding-right: 2rem !important;
         max-width: 100% !important;
+      }}
+
+      /* Remove vertical flex gap from zero-height helper iframes & fixed theme trigger */
+      div.stElementContainer:has(iframe[height="0"]),
+      div.element-container:has(iframe[height="0"]) {{
+        height: 0 !important;
+        min-height: 0 !important;
+        margin: -0.5rem 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
       }}
 
       h1, h2, h3, h4, .te-heading {{
@@ -257,16 +321,168 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         border-radius: 5px !important;
       }}
 
-      /* Sidebar styling (Time Machine) */
+      /* Sidebar styling (Time Machine & Controls) */
       section[data-testid="stSidebar"] {{
         background: var(--te-bg-sidebar) !important;
         border-right: 1px solid var(--te-border) !important;
       }}
 
-      section[data-testid="stSidebar"] .block-container {{
-        padding-top: 1.1rem !important;
-        padding-left: 1.15rem !important;
-        padding-right: 1.15rem !important;
+      [data-testid="stSidebarHeader"] {{
+        height: 3rem !important;
+        min-height: 48px !important;
+        padding: 0 1.05rem !important;
+        margin-bottom: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+      }}
+
+      section[data-testid="stSidebar"] .block-container,
+      [data-testid="stSidebarUserContent"] {{
+        padding-top: 6px !important;
+        padding-left: 1.05rem !important;
+        padding-right: 1.05rem !important;
+        padding-bottom: 1.25rem !important;
+      }}
+
+      /* Sleek Sidebar Collapse (<<) & Expand (>>) Buttons */
+      [data-testid="stSidebarCollapseButton"] button,
+      [data-testid="stExpandSidebarButton"],
+      [data-testid="collapsedControl"] button {{
+        width: 34px !important;
+        height: 34px !important;
+        min-height: 34px !important;
+        border-radius: 9px !important;
+        background: var(--te-bg-surface) !important;
+        border: 1px solid var(--te-border) !important;
+        color: var(--te-turquoise) !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        box-shadow: var(--te-shadow-sm) !important;
+        transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+      }}
+
+      [data-testid="stSidebarCollapseButton"] button:hover,
+      [data-testid="stExpandSidebarButton"]:hover,
+      [data-testid="collapsedControl"] button:hover {{
+        border-color: var(--te-orange) !important;
+        background: var(--te-orange-light) !important;
+        color: var(--te-orange) !important;
+        transform: scale(1.06) !important;
+      }}
+
+      /* Sidebar Header Card */
+      .te-sb-header-card {{
+        background: var(--te-bg-surface);
+        border: 1px solid var(--te-border);
+        border-left: 4px solid var(--te-orange);
+        border-radius: 10px 20px 10px 10px;
+        padding: 0.78rem 0.95rem;
+        margin-bottom: 0.95rem;
+        box-shadow: var(--te-shadow-sm);
+      }}
+
+      .te-sb-kicker {{
+        font-family: 'Fira Sans Extra Condensed', sans-serif;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--te-orange);
+        margin-bottom: 0.15rem;
+      }}
+
+      .te-sb-title {{
+        font-family: 'Fira Sans Extra Condensed', sans-serif;
+        font-size: 1.32rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        color: var(--te-heading-color);
+        margin: 0 0 0.22rem 0;
+        line-height: 1.15;
+      }}
+
+      .te-sb-desc {{
+        font-size: 0.76rem;
+        line-height: 1.38;
+        color: var(--te-text-muted);
+        margin: 0;
+      }}
+
+      /* Sidebar Section Labels (1. Dataset Period, 2. Origin Selection, etc.) */
+      .te-sb-section-label {{
+        font-family: 'Fira Sans Extra Condensed', sans-serif;
+        font-size: 0.82rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--te-turquoise);
+        margin: 0.65rem 0 0.35rem 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }}
+
+      .te-sb-count-pill {{
+        font-family: 'Fira Sans', sans-serif;
+        font-size: 0.68rem;
+        font-weight: 600;
+        color: var(--te-text);
+        background: var(--te-bg-elevated);
+        border: 1px solid var(--te-border);
+        padding: 0.08rem 0.48rem;
+        border-radius: 99px;
+      }}
+
+      /* Styled Dataset Period Radio Cards inside Sidebar */
+      section[data-testid="stSidebar"] div[role="radiogroup"] {{
+        gap: 0.42rem !important;
+      }}
+
+      section[data-testid="stSidebar"] div[role="radiogroup"] > label {{
+        background: var(--te-bg-surface) !important;
+        border: 1px solid var(--te-border) !important;
+        border-radius: 9px !important;
+        padding: 0.48rem 0.72rem !important;
+        margin: 0 !important;
+        width: 100% !important;
+        transition: all 0.18s ease !important;
+        cursor: pointer !important;
+      }}
+
+      section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {{
+        border-color: var(--te-orange) !important;
+        background: var(--te-bg-elevated) !important;
+      }}
+
+      section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {{
+        border-color: var(--te-orange) !important;
+        border-left: 4px solid var(--te-orange) !important;
+        background: var(--te-orange-light) !important;
+        box-shadow: var(--te-shadow-sm) !important;
+      }}
+
+      /* Sidebar Prev / Next Step Buttons */
+      section[data-testid="stSidebar"] .stButton > button {{
+        height: 38px !important;
+        min-height: 38px !important;
+        border-radius: 9px !important;
+        background: linear-gradient(180deg, var(--te-bg-elevated) 0%, var(--te-bg-surface) 100%) !important;
+        border: 1px solid var(--te-border) !important;
+        font-family: 'Fira Sans Extra Condensed', sans-serif !important;
+        font-size: 0.94rem !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.03em !important;
+        text-transform: uppercase !important;
+        box-shadow: var(--te-shadow-sm) !important;
+      }}
+
+      section[data-testid="stSidebar"] .stButton > button:hover {{
+        border-color: var(--te-orange) !important;
+        background: var(--te-orange) !important;
+        color: #FFFFFF !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(245, 155, 0, 0.35) !important;
       }}
 
       /* Native Selectbox / Input / Expander Dark Polish */
@@ -740,11 +956,162 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         background: var(--te-bg-surface);
         border: 1px solid var(--te-border);
         border-left: 4px solid var(--te-lime);
-        border-radius: 10px;
-        padding: 0.8rem 0.95rem;
-        font-size: 0.8rem;
+        border-radius: 10px 20px 10px 10px;
+        padding: 0.82rem 0.9rem;
+        font-size: 0.78rem;
         color: var(--te-text);
         box-shadow: var(--te-shadow-sm);
+      }}
+
+      .te-gate-row {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 0.24rem 0;
+        gap: 0.4rem;
+        white-space: nowrap;
+      }}
+
+      .te-gate-verified {{
+        margin-top: 0.48rem;
+        padding: 0.28rem 0.55rem;
+        border-radius: 6px;
+        background: var(--te-delta-ok-bg);
+        color: var(--te-delta-ok-text);
+        font-weight: 700;
+        font-size: 0.73rem;
+        white-space: nowrap;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.3rem;
+      }}
+
+      /* =====================================================================
+         Top-Right Sun <-> Moon Morphing Theme Toggle (Next to Deploy button)
+         ===================================================================== */
+      @keyframes teMoonMorph {{
+        0% {{
+          transform: translateX(-28px) rotate(-160deg) scale(0.35);
+          opacity: 0.2;
+        }}
+        65% {{
+          transform: translateX(2px) rotate(12deg) scale(1.08);
+          opacity: 1;
+        }}
+        100% {{
+          transform: translateX(0px) rotate(0deg) scale(1);
+          opacity: 1;
+        }}
+      }}
+
+      @keyframes teSunMorph {{
+        0% {{
+          transform: translateX(28px) rotate(160deg) scale(0.35);
+          opacity: 0.2;
+        }}
+        65% {{
+          transform: translateX(-2px) rotate(-12deg) scale(1.08);
+          opacity: 1;
+        }}
+        100% {{
+          transform: translateX(0px) rotate(0deg) scale(1);
+          opacity: 1;
+        }}
+      }}
+
+      div.st-key-te_theme_toggle_btn {{
+        position: fixed !important;
+        top: 0.52rem !important;
+        right: 8.6rem !important;
+        z-index: 1000005 !important;
+        width: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }}
+
+      div.st-key-te_theme_toggle_btn > div {{
+        width: auto !important;
+      }}
+
+      div.st-key-te_theme_toggle_btn button {{
+        position: relative !important;
+        width: 70px !important;
+        height: 34px !important;
+        min-height: 34px !important;
+        padding: 0 !important;
+        border-radius: 999px !important;
+        background: {"linear-gradient(135deg, #091A2A 0%, #13314C 100%)" if dark_mode else "linear-gradient(135deg, #FFF4E0 0%, #EAF7FB 100%)"} !important;
+        border: 1.5px solid {"#46BEDC" if dark_mode else "#F59B00"} !important;
+        box-shadow: {"0 0 14px rgba(70, 190, 220, 0.35), inset 0 1px 4px rgba(0,0,0,0.6)" if dark_mode else "0 2px 10px rgba(245, 155, 0, 0.28), inset 0 1px 3px rgba(245, 155, 0, 0.15)"} !important;
+        cursor: pointer !important;
+        overflow: hidden !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+      }}
+
+      div.st-key-te_theme_toggle_btn button:hover {{
+        transform: scale(1.06) !important;
+        border-color: var(--te-orange) !important;
+        box-shadow: 0 0 18px rgba(245, 155, 0, 0.55) !important;
+      }}
+
+      div.st-key-te_theme_toggle_btn button p {{
+        display: none !important;
+      }}
+
+      /* Left Icon: Sun (Active in Light Mode, Dormant/Morphed in Dark Mode) */
+      div.st-key-te_theme_toggle_btn button::before {{
+        content: "";
+        position: absolute;
+        left: 4px;
+        top: 3px;
+        width: 25px;
+        height: 25px;
+        border-radius: 50%;
+        background-color: {"transparent" if dark_mode else "#F59B00"};
+        box-shadow: {"none" if dark_mode else "0 2px 8px rgba(245, 155, 0, 0.55)"};
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FFFFFF' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4' fill='%23FFD719'/%3E%3Cpath d='M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41'/%3E%3C/svg%3E");
+        background-size: 17px 17px;
+        background-position: center;
+        background-repeat: no-repeat;
+        transform: {"scale(0.62) rotate(-90deg)" if dark_mode else "scale(1) rotate(0deg)"};
+        opacity: {"0.42" if dark_mode else "1"};
+        animation: {"none" if dark_mode else "teSunMorph 0.52s cubic-bezier(0.34, 1.56, 0.64, 1) forwards"};
+        transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.35s ease, background-color 0.35s ease;
+      }}
+
+      /* Right Icon: Crescent Moon & Stars (Active in Dark Mode, Dormant/Morphed in Light Mode) */
+      div.st-key-te_theme_toggle_btn button::after {{
+        content: "";
+        position: absolute;
+        right: 4px;
+        top: 3px;
+        width: 25px;
+        height: 25px;
+        border-radius: 50%;
+        background-color: {"#0F4B73" if dark_mode else "transparent"};
+        box-shadow: {"0 0 10px rgba(70, 190, 220, 0.65)" if dark_mode else "none"};
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2346BEDC' stroke='%23FFFFFF' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'/%3E%3C/svg%3E");
+        background-size: 16px 16px;
+        background-position: center;
+        background-repeat: no-repeat;
+        transform: {"scale(1) rotate(0deg)" if dark_mode else "scale(0.62) rotate(90deg)"};
+        opacity: {"1" if dark_mode else "0.42"};
+        animation: {"teMoonMorph 0.52s cubic-bezier(0.34, 1.56, 0.64, 1) forwards" if dark_mode else "none"};
+        transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.35s ease, background-color 0.35s ease;
+      }}
+
+      div.st-key-te_theme_toggle_btn button:hover::before {{
+        transform: {"scale(0.82) rotate(-25deg)" if dark_mode else "scale(1.08) rotate(25deg)"};
+        opacity: {"0.85" if dark_mode else "1"};
+      }}
+
+      div.st-key-te_theme_toggle_btn button:hover::after {{
+        transform: {"scale(1.08) rotate(-15deg)" if dark_mode else "scale(0.82) rotate(25deg)"};
+        opacity: {"1" if dark_mode else "0.85"};
       }}
     </style>
     """
@@ -861,3 +1228,228 @@ def render_alert_cards(alerts: list[dict[str, str]]) -> str:
             """
         )
     return "\n".join(cards_html)
+
+
+def get_toolbar_theme_toggle_html(dark_mode: bool = True) -> str:
+    """Return JS/HTML snippet that mounts a morphing Sun <-> Moon button directly left of 'Deploy'."""
+    state_cls = "is-dark" if dark_mode else "is-light"
+    label_txt = "Dark" if dark_mode else "Light"
+    return f"""
+    <script>
+    (function() {{
+      const doc = window.parent.document;
+      if (!doc) return;
+
+      // 1. Inject CSS for the toolbar Sun <-> Moon morphing button once
+      let styleEl = doc.getElementById('te-toolbar-toggle-style');
+      if (!styleEl) {{
+        styleEl = doc.createElement('style');
+        styleEl.id = 'te-toolbar-toggle-style';
+        styleEl.textContent = `
+          #te-toolbar-theme-btn {{
+            display: inline-flex;
+            align-items: center;
+            align-self: center;
+            gap: 7px;
+            height: 34px;
+            min-height: 34px;
+            padding: 0 12px 0 8px;
+            margin: 0 6px 0 0;
+            border-radius: 999px;
+            cursor: pointer;
+            user-select: none;
+            font-family: 'Fira Sans Extra Condensed', sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            position: relative;
+            z-index: 1000010;
+          }}
+          #te-toolbar-theme-btn.is-dark {{
+            background: linear-gradient(135deg, #0B1E30 0%, #143552 100%);
+            color: #E6F6FA;
+            border: 1.5px solid #46BEDC;
+            box-shadow: 0 0 12px rgba(70, 190, 220, 0.35);
+          }}
+          #te-toolbar-theme-btn.is-light {{
+            background: linear-gradient(135deg, #FFF5E2 0%, #EAF7FB 100%);
+            color: #0F4B73;
+            border: 1.5px solid #F59B00;
+            box-shadow: 0 2px 10px rgba(245, 155, 0, 0.3);
+          }}
+          #te-toolbar-theme-btn:hover {{
+            transform: translateY(-1px) scale(1.04);
+            border-color: #F59B00;
+            box-shadow: 0 0 16px rgba(245, 155, 0, 0.55);
+          }}
+          #te-toolbar-theme-btn .te-morph-icon {{
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+          }}
+          #te-toolbar-theme-btn.is-dark .te-morph-icon {{
+            background: #0F4B73;
+            color: #46BEDC;
+            transform: rotate(360deg);
+          }}
+          #te-toolbar-theme-btn.is-light .te-morph-icon {{
+            background: #F59B00;
+            color: #FFFFFF;
+            transform: rotate(0deg);
+          }}
+          /* SVG Mask Morphing: Sun <-> Crescent Moon */
+          #te-toolbar-theme-btn svg.te-sun-moon-svg {{
+            width: 15px;
+            height: 15px;
+            overflow: visible;
+            transition: transform 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+          }}
+          #te-toolbar-theme-btn.is-dark svg.te-sun-moon-svg {{
+            transform: rotate(40deg);
+          }}
+          #te-toolbar-theme-btn.is-light svg.te-sun-moon-svg {{
+            transform: rotate(90deg);
+          }}
+          #te-toolbar-theme-btn .te-core {{
+            transition: r 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), fill 0.35s ease;
+          }}
+          #te-toolbar-theme-btn.is-dark .te-core {{
+            fill: #46BEDC;
+          }}
+          #te-toolbar-theme-btn.is-light .te-core {{
+            fill: #FFFFFF;
+          }}
+          #te-toolbar-theme-btn .te-cutout {{
+            transition: cx 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), cy 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+          }}
+          #te-toolbar-theme-btn .te-rays {{
+            transform-origin: center center;
+            transition: opacity 0.35s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+          }}
+          #te-toolbar-theme-btn.is-dark .te-rays {{
+            opacity: 0;
+            transform: scale(0.2) rotate(-60deg);
+          }}
+          #te-toolbar-theme-btn.is-light .te-rays {{
+            opacity: 1;
+            transform: scale(1) rotate(0deg);
+          }}
+          /* Hide the underlying native trigger button once toolbar button is mounted */
+          body.te-toolbar-mounted div.st-key-te_theme_toggle_btn {{
+            opacity: 0 !important;
+            pointer-events: none !important;
+            width: 1px !important;
+            height: 1px !important;
+            overflow: hidden !important;
+          }}
+        `;
+        doc.head.appendChild(styleEl);
+      }}
+
+      function mountButton() {{
+        const deployBtn =
+          doc.querySelector('[data-testid="stAppDeployButton"]') ||
+          doc.querySelector('.stAppDeployButton') ||
+          doc.querySelector('[data-testid="stToolbarActions"]');
+        const toolbar =
+          doc.querySelector('[data-testid="stToolbar"]') ||
+          doc.querySelector('header[data-testid="stHeader"]');
+
+        if (!toolbar && !deployBtn) return false;
+
+        let btn = doc.getElementById('te-toolbar-theme-btn');
+        if (!btn) {{
+          btn = doc.createElement('button');
+          btn.id = 'te-toolbar-theme-btn';
+          btn.type = 'button';
+          btn.title = 'Switch between Dark Mode (Moon) and Light Mode (Sun)';
+          btn.innerHTML = `
+            <span class="te-morph-icon">
+              <svg class="te-sun-moon-svg" viewBox="0 0 24 24">
+                <mask id="te-moon-cutout-mask">
+                  <rect x="0" y="0" width="24" height="24" fill="white"/>
+                  <circle class="te-cutout" cx="{16 if dark_mode else 26}" cy="{7 if dark_mode else 0}" r="6.5" fill="black"/>
+                </mask>
+                <circle class="te-core" cx="12" cy="12" r="{8.2 if dark_mode else 5}" mask="url(#te-moon-cutout-mask)"/>
+                <g class="te-rays" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round">
+                  <line x1="12" y1="1.5" x2="12" y2="3.8"/>
+                  <line x1="12" y1="20.2" x2="12" y2="22.5"/>
+                  <line x1="4.5" y1="4.5" x2="6.2" y2="6.2"/>
+                  <line x1="17.8" y1="17.8" x2="19.5" y2="19.5"/>
+                  <line x1="1.5" y1="12" x2="3.8" y2="12"/>
+                  <line x1="20.2" y1="12" x2="22.5" y2="12"/>
+                  <line x1="4.5" y1="19.5" x2="6.2" y2="17.8"/>
+                  <line x1="17.8" y1="6.2" x2="19.5" y2="4.5"/>
+                </g>
+              </svg>
+            </span>
+            <span class="te-mode-text">{label_txt}</span>
+          `;
+
+          if (deployBtn && deployBtn.parentNode) {{
+            deployBtn.parentNode.insertBefore(btn, deployBtn);
+          }} else if (toolbar) {{
+            toolbar.prepend(btn);
+          }}
+        }}
+
+        // Always attach the click handler on window.parent so it never dies when iframes re-render
+        window.parent.__teToggleTheme = function() {{
+          const currentBtn = doc.getElementById('te-toolbar-theme-btn');
+          if (!currentBtn) return;
+          const isCurrentlyDark = currentBtn.classList.contains('is-dark');
+          const nextDark = !isCurrentlyDark;
+          currentBtn.className = nextDark ? 'is-dark' : 'is-light';
+          const cutout = currentBtn.querySelector('.te-cutout');
+          const core = currentBtn.querySelector('.te-core');
+          const txt = currentBtn.querySelector('.te-mode-text');
+          if (cutout) {{
+            cutout.setAttribute('cx', nextDark ? '16' : '26');
+            cutout.setAttribute('cy', nextDark ? '7' : '0');
+          }}
+          if (core) {{
+            core.setAttribute('r', nextDark ? '8.2' : '5');
+          }}
+          if (txt) {{
+            txt.textContent = nextDark ? 'Dark' : 'Light';
+          }}
+          const trigger = doc.querySelector('div.st-key-te_theme_toggle_btn button');
+          if (trigger) {{
+            trigger.click();
+          }}
+        }};
+        btn.onclick = window.parent.__teToggleTheme;
+
+        // Sync visual state with Python session_state
+        btn.className = '{state_cls}';
+        const cutout = btn.querySelector('.te-cutout');
+        const core = btn.querySelector('.te-core');
+        const txt = btn.querySelector('.te-mode-text');
+        if (cutout) {{
+          cutout.setAttribute('cx', '{16 if dark_mode else 26}');
+          cutout.setAttribute('cy', '{7 if dark_mode else 0}');
+        }}
+        if (core) {{
+          core.setAttribute('r', '{8.2 if dark_mode else 5}');
+        }}
+        if (txt) {{
+          txt.textContent = '{label_txt}';
+        }}
+        doc.body.classList.add('te-toolbar-mounted');
+        return true;
+      }}
+
+      if (!mountButton()) {{
+        setTimeout(mountButton, 120);
+        setTimeout(mountButton, 400);
+      }}
+    }})();
+    </script>
+    """
+

@@ -24,6 +24,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -41,6 +42,7 @@ from apps.charts import (
 from apps.theme import (
     TE_COLORS,
     format_driver_name,
+    get_toolbar_theme_toggle_html,
     inject_brand_css,
     render_alert_cards,
     render_hero_header,
@@ -394,27 +396,41 @@ def main() -> None:
         return
 
     # ------------------------------------------------------------------
-    # Left Sidebar: Time Machine Controls, Theme Switcher & Anti-Leakage Gate
+    # Theme State (Default: Control-Room Dark Mode)
+    # ------------------------------------------------------------------
+    if "dark_mode" not in st.session_state:
+        st.session_state.dark_mode = True
+
+    def _toggle_theme() -> None:
+        st.session_state.dark_mode = not bool(st.session_state.get("dark_mode", True))
+
+    dark_mode: bool = bool(st.session_state.dark_mode)
+
+    # ------------------------------------------------------------------
+    # Left Sidebar: Time Machine Controls & Anti-Leakage Gate
     # ------------------------------------------------------------------
     with st.sidebar:
         st.markdown(
             """
-            <div style="margin-bottom:0.8rem;">
-              <h2 style="margin:0; font-size:1.45rem; text-transform:uppercase;">
-                🕰️ Time Machine<span style="color:#F59B00;">.</span>
-              </h2>
-              <p style="margin:0.15rem 0 0 0; font-size:0.82rem; opacity:0.82;">
-                Select Period &amp; Forecast Origin (<i>t</i>)
+            <div class="te-sb-header-card">
+              <div class="te-sb-kicker">Control Desk Navigation</div>
+              <h2 class="te-sb-title">⏱️ Historical Time Machine</h2>
+              <p class="te-sb-desc">
+                Jump to any hourly forecast origin (<i>t</i>) to inspect the exact 10-hour outlook known at that moment.
               </p>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        dark_mode = st.toggle(
-            "🌙 Control-Room Dark Mode",
-            value=True,
-            help="Switch between Turku Energia Control-Room Dark Mode (default) and Web Light Mode.",
+        st.markdown(
+            """
+            <div class="te-sb-section-label">
+              <span>1. Dataset Period</span>
+              <span class="te-sb-count-pill">2026</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         period_options = []
@@ -423,7 +439,12 @@ def main() -> None:
         if val_sub is not None:
             period_options.append("Validation Period (7 Sep – 4 Oct 2026)")
 
-        selected_period = st.radio("Dataset Period", period_options, index=0)
+        selected_period = st.radio(
+            "Dataset Period",
+            period_options,
+            index=0,
+            label_visibility="collapsed",
+        )
         active_sub = test_sub if selected_period.startswith("Test") else val_sub
         assert active_sub is not None
 
@@ -446,6 +467,16 @@ def main() -> None:
             "🔥 Top 20 High-Price Spike Origins (> Spot + 50 €)",
             "❄️ Top 20 Low / Negative Spike Origins (< Spot − 50 €)",
         ]
+
+        st.markdown(
+            """
+            <div class="te-sb-section-label" style="margin-top:0.85rem;">
+              <span>2. Origin Filter &amp; Time Step (t)</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         filter_mode = st.selectbox(
             "Quick Filter (Origin Filter)",
             filter_options,
@@ -474,57 +505,97 @@ def main() -> None:
         if "origin_idx" not in st.session_state or st.session_state.get("last_filter") != (selected_period, filter_mode):
             st.session_state.origin_idx = 0
             st.session_state.last_filter = (selected_period, filter_mode)
+            st.session_state.origin_select_box = origin_labels[0]
 
-        # Prev / Next Hour Navigation Buttons
-        nav_c1, nav_c2 = st.columns(2)
-        with nav_c1:
-            if st.button("◀ Previous", use_container_width=True) and st.session_state.origin_idx > 0:
+        st.session_state.origin_idx = min(st.session_state.origin_idx, len(origin_labels) - 1)
+        if st.session_state.get("origin_select_box") not in origin_labels:
+            st.session_state.origin_select_box = origin_labels[st.session_state.origin_idx]
+
+        def _on_select_origin() -> None:
+            chosen = st.session_state.get("origin_select_box")
+            if chosen in origin_labels:
+                st.session_state.origin_idx = origin_labels.index(chosen)
+
+        def _step_prev() -> None:
+            if st.session_state.origin_idx > 0:
                 st.session_state.origin_idx -= 1
-        with nav_c2:
-            if st.button("Next ▶", use_container_width=True) and st.session_state.origin_idx + 1 < len(origin_labels):
+                st.session_state.origin_select_box = origin_labels[st.session_state.origin_idx]
+
+        def _step_next() -> None:
+            if st.session_state.origin_idx + 1 < len(origin_labels):
                 st.session_state.origin_idx += 1
+                st.session_state.origin_select_box = origin_labels[st.session_state.origin_idx]
 
         selected_label = st.selectbox(
-            "Forecast Origin (t)",
+            f"Forecast Origin (t) — [{st.session_state.origin_idx + 1} / {len(origin_labels)}]",
             origin_labels,
-            index=min(st.session_state.origin_idx, len(origin_labels) - 1),
+            key="origin_select_box",
+            on_change=_on_select_origin,
         )
         st.session_state.origin_idx = origin_labels.index(selected_label)
         selected_origin = candidate_origins[st.session_state.origin_idx]
 
-        st.divider()
+        # Prev / Next Hour Navigation Buttons placed directly BELOW Forecast Origin (t)
+        nav_c1, nav_c2 = st.columns(2)
+        with nav_c1:
+            st.button(
+                "◀ Previous",
+                use_container_width=True,
+                on_click=_step_prev,
+                disabled=(st.session_state.origin_idx <= 0),
+            )
+        with nav_c2:
+            st.button(
+                "Next ▶",
+                use_container_width=True,
+                on_click=_step_next,
+                disabled=(st.session_state.origin_idx + 1 >= len(origin_labels)),
+            )
+
+        st.markdown(
+            """
+            <div class="te-sb-section-label" style="margin-top:0.9rem;">
+              <span>3. Display &amp; Overlays</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         show_chat_sidebar = st.toggle(
             "🤖 Show AI Explainability Chat",
             value=True,
             help="Show or hide the interactive AI Explainability Chat sidebar on the right.",
         )
-        show_hindsight = st.checkbox(
+        show_hindsight = st.toggle(
             "🎯 Overlay Actual Prices (Hindsight)",
             value=selected_period.startswith("Validation"),
             help="Overlays realized imbalance prices after origin t for post-event validation.",
         )
 
-        st.divider()
+        st.markdown("<div style='height:0.45rem;'></div>", unsafe_allow_html=True)
         origin_rows = active_sub[active_sub["forecast_origin_utc"] == selected_origin].sort_values("step")
         cutoff_ts = pd.Timestamp(origin_rows["data_cutoff_utc"].iloc[0])
         st.markdown(
             f"""
             <div class="te-gate-box">
-              <div style="font-family:'Fira Sans Extra Condensed',sans-serif; font-weight:800; font-size:0.95rem; text-transform:uppercase; color:#46BEDC; margin-bottom:0.3rem;">
+              <div style="font-family:'Fira Sans Extra Condensed',sans-serif; font-weight:800; font-size:0.92rem; text-transform:uppercase; color:#46BEDC; margin-bottom:0.35rem; letter-spacing:0.03em;">
                 🛡️ Anti-Leakage Gate (Rule #1)
               </div>
-              <div><strong>Origin <i>t</i>:</strong> <code>{selected_origin.strftime('%Y-%m-%d %H:%M:%SZ')}</code></div>
-              <div><strong>Data Cutoff:</strong> <code>{cutoff_ts.strftime('%Y-%m-%d %H:%M:%SZ')}</code></div>
-              <div style="margin-top:0.35rem; color:#AAC800; font-weight:700;">
-                ✓ Verified: <code>first_usable_origin_utc ≤ t</code>
+              <div class="te-gate-row">
+                <span><strong>Origin (<i>t</i>):</strong></span>
+                <code>{selected_origin.strftime('%Y-%m-%d %H:%M:%SZ')}</code>
+              </div>
+              <div class="te-gate-row">
+                <span><strong>Data Cutoff:</strong></span>
+                <code>{cutoff_ts.strftime('%Y-%m-%d %H:%M:%SZ')}</code>
+              </div>
+              <div class="te-gate-verified">
+                <span>✓ Verified:</span>
+                <code style="background:transparent !important; border:none !important; padding:0 !important; color:inherit !important; font-weight:700;">first_usable_origin_utc ≤ t</code>
               </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-
-    # Inject Turku Energia Corporate Identity CSS (Dark or Light)
-    st.markdown(inject_brand_css(dark_mode=dark_mode), unsafe_allow_html=True)
 
     # ------------------------------------------------------------------
     # Prepare Data for Selected Origin t
@@ -547,10 +618,11 @@ def main() -> None:
     briefing = build_situational_narrative(origin_df, prev_origin_df, usable_grid, selected_origin)
 
     # ------------------------------------------------------------------
-    # Top Brand Header (Turku Energia Official Logo + Slogan)
+    # Top Brand Header + CSS (Combined into single block to avoid top flex gap)
     # ------------------------------------------------------------------
     st.markdown(
-        render_hero_header(
+        inject_brand_css(dark_mode=dark_mode)
+        + render_hero_header(
             origin_str=selected_origin.strftime("%Y-%m-%d %H:%M UTC"),
             period_label=selected_period,
         ),
@@ -841,6 +913,15 @@ def main() -> None:
     if chat_col is not None:
         with chat_col:
             _render_chat_sidebar(origin_df, briefing, selected_origin)
+
+    # Mount the Sun <-> Moon toggle button into Streamlit's top toolbar (at bottom of DOM to avoid top gap)
+    st.button(
+        "Theme",
+        key="te_theme_toggle_btn",
+        on_click=_toggle_theme,
+        help="Switch between Control-Room Dark Mode (Moon) and Web Light Mode (Sun)",
+    )
+    components.html(get_toolbar_theme_toggle_html(dark_mode=dark_mode), height=0)
 
 
 if __name__ == "__main__":
