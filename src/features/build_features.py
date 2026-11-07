@@ -53,6 +53,13 @@ FEATURE_DRIVER_NAMES: dict[str, str] = {
     "last_afrr_down_price": "afrr_down_price",
     "last_afrr_up_spread": "afrr_up_price_spread",
     "last_afrr_down_spread": "afrr_down_price_spread",
+    "afrr_mfrr_up_gap_60m": "afrr_mfrr_up_price_gap",
+    "afrr_mfrr_dn_gap_60m": "afrr_mfrr_down_price_gap",
+    "implied_mfrr_weight_60m": "volume_pricing_mfrr_weight",
+    "implied_mfrr_weight_mean_4q": "volume_pricing_mfrr_weight_1h",
+    "implied_afrr_vol_60m": "implied_afrr_activated_volume",
+    "wind_rt_error_at_origin": "realtime_wind_forecast_error",
+    "nuclear_rt_ramp_1h": "realtime_nuclear_generation_ramp",
     "spot_lead_1h": "spot_price_1h_lead_ramp",
     "se1_load_da_at_delivery": "sweden_se1_load_forecast",
     "se3_load_da_at_delivery": "sweden_se3_load_forecast",
@@ -219,6 +226,48 @@ def build_feature_Frame(
     ocols["last_afrr_up_active"] = afrr_up_p_s.notna().astype(float).rolling(4, min_periods=1).mean().reindex(t60_idx).to_numpy()
     ocols["last_afrr_down_active"] = afrr_dn_p_s.notna().astype(float).rolling(4, min_periods=1).mean().reindex(t60_idx).to_numpy()
 
+    # Volume-based imbalance pricing decomposition (post-June 2026 methodology)
+    # In the volume-weighted regime, realized imbalance price blends mFRR and aFRR marginal prices
+    # by their activated volumes: P_imb = w_mfrr * P_mfrr + (1 - w_mfrr) * P_afrr.
+    afrr_mfrr_up_gap_s = (mfrr_up_p_s - afrr_up_ff).fillna(0.0)
+    afrr_mfrr_dn_gap_s = (afrr_dn_ff - mfrr_dn_p_s).fillna(0.0)
+    ocols["afrr_mfrr_up_gap_60m"] = afrr_mfrr_up_gap_s.reindex(t60_idx).to_numpy()
+    ocols["afrr_mfrr_dn_gap_60m"] = afrr_mfrr_dn_gap_s.reindex(t60_idx).to_numpy()
+    ocols["afrr_mfrr_up_gap_mean_4q"] = afrr_mfrr_up_gap_s.rolling(4, min_periods=1).mean().reindex(t60_idx).to_numpy()
+    ocols["afrr_mfrr_dn_gap_mean_4q"] = afrr_mfrr_dn_gap_s.rolling(4, min_periods=1).mean().reindex(t60_idx).to_numpy()
+
+    active_m_p = pd.Series(
+        np.where(dir_s >= 0, mfrr_up_p_s, mfrr_dn_p_s), index=imb_s.index
+    )
+    active_a_p = pd.Series(
+        np.where(dir_s >= 0, afrr_up_ff, afrr_dn_ff), index=imb_s.index
+    )
+    active_m_vol = pd.Series(
+        np.where(dir_s >= 0, mfrr_up_act_s, mfrr_dn_act_s.abs()), index=imb_s.index
+    )
+    denom_ma = active_m_p - active_a_p
+    w_mfrr_s = pd.Series(
+        np.where(
+            denom_ma.abs() > 1.0,
+            np.clip((imb_s - active_a_p) / np.where(denom_ma.abs() > 1.0, denom_ma, 1.0), 0.0, 1.0),
+            1.0,
+        ),
+        index=imb_s.index,
+    )
+    implied_afrr_vol_s = pd.Series(
+        np.clip(
+            active_m_vol * (1.0 - w_mfrr_s) / np.maximum(w_mfrr_s, 0.08),
+            0.0,
+            250.0,
+        ),
+        index=imb_s.index,
+    )
+    ocols["implied_mfrr_weight_60m"] = w_mfrr_s.reindex(t60_idx).to_numpy()
+    ocols["implied_mfrr_weight_mean_4q"] = w_mfrr_s.rolling(4, min_periods=1).mean().reindex(t60_idx).to_numpy()
+    ocols["implied_mfrr_weight_mean_16q"] = w_mfrr_s.rolling(16, min_periods=1).mean().reindex(t60_idx).to_numpy()
+    ocols["implied_afrr_vol_60m"] = implied_afrr_vol_s.reindex(t60_idx).to_numpy()
+    ocols["implied_afrr_vol_mean_4q"] = implied_afrr_vol_s.rolling(4, min_periods=1).mean().reindex(t60_idx).to_numpy()
+
     # 30m lag features
     cons_s = store.val_wide["fi_consumption"].ffill(limit=4)
     prod_s = store.val_wide["fi_production"].ffill(limit=4)
@@ -267,6 +316,39 @@ def build_feature_Frame(
         tot_flow_s.reindex(t30_idx).to_numpy()
         - tot_flow_s.reindex(t30_idx - pd.Timedelta(hours=1)).to_numpy()
     )
+
+    # Optional Fingrid 3-minute real-time series (181 Wind RT, 188 Nuclear RT, 191 Prod RT, 177 Grid State RT)
+    # Strictly gated by their own `first_usable_origin_utc <= origin_utc`
+    if "fi_wind_rt" in store.val_wide.columns and store.val_wide["fi_wind_rt"].notna().any():
+        t_wind_rt = store.latest_usable_timestamp_per_origin("fi_wind_rt", origins_idx)
+        wind_rt_s = store.val_wide["fi_wind_rt"].ffill(limit=4)
+        wind_rt_err_s = wind_rt_s - wind_da_s
+        ocols["wind_rt_at_origin"] = wind_rt_s.reindex(t_wind_rt).to_numpy()
+        ocols["wind_rt_error_at_origin"] = wind_rt_err_s.reindex(t_wind_rt).to_numpy()
+        ocols["wind_rt_error_mean_4q"] = wind_rt_err_s.rolling(4, min_periods=1).mean().reindex(t_wind_rt).to_numpy()
+        ocols["wind_rt_ramp_1h"] = (
+            wind_rt_s.reindex(t_wind_rt).to_numpy()
+            - wind_rt_s.reindex(t_wind_rt - pd.Timedelta(hours=1)).to_numpy()
+        )
+    if "fi_nuclear_rt" in store.val_wide.columns and store.val_wide["fi_nuclear_rt"].notna().any():
+        t_nuc_rt = store.latest_usable_timestamp_per_origin("fi_nuclear_rt", origins_idx)
+        nuc_rt_s = store.val_wide["fi_nuclear_rt"].ffill(limit=4)
+        ocols["nuclear_rt_at_origin"] = nuc_rt_s.reindex(t_nuc_rt).to_numpy()
+        ocols["nuclear_rt_ramp_1h"] = (
+            nuc_rt_s.reindex(t_nuc_rt).to_numpy()
+            - nuc_rt_s.reindex(t_nuc_rt - pd.Timedelta(hours=1)).to_numpy()
+        )
+    if "fi_grid_state_rt" in store.val_wide.columns and store.val_wide["fi_grid_state_rt"].notna().any():
+        s_fu_state = store.fu_wide["fi_grid_state_rt"].dropna()
+        s_val_state = store.val_wide["fi_grid_state_rt"].reindex(s_fu_state.index)
+        s_fu_state = s_fu_state[s_val_state.notna()]
+        pos_state = s_fu_state.searchsorted(origins_idx, side="right") - 1
+        state_rt_s = store.val_wide["fi_grid_state_rt"].ffill(limit=4)
+        valid_pos = pos_state >= 0
+        state_arr = np.full(len(origins_idx), np.nan, dtype=float)
+        if np.any(valid_pos):
+            state_arr[valid_pos] = state_rt_s.reindex(s_fu_state.index[pos_state[valid_pos]]).to_numpy()
+        ocols["grid_state_rt_at_origin"] = state_arr
 
     # 120m lag features (neighboring areas)
     se1_imb_s = store.val_wide["se1_imbalance_price_long"]

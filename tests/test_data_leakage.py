@@ -162,3 +162,27 @@ def test_build_feature_frame_target_cutoff_masks_post_cutoff_targets(
         assert df.loc[post_cutoff_mask, col].isna().all(), (
             f"Target column {col} leaked post-cutoff labels!"
         )
+
+
+def test_realtime_3min_resampling_and_availability_lag() -> None:
+    """Verify 3-min Fingrid series (181/188/191/177) resample cleanly and enforce first_usable_origin_utc."""
+    from src.data.extra_data import REALTIME_FINGRID_SERIES, resample_3min_to_quarter_hour
+
+    spec_wind = REALTIME_FINGRID_SERIES[0]  # 181 Wind RT
+    raw = pd.DataFrame([
+        {"startTime": "2026-09-10T10:00:00Z", "value": 1200.0},
+        {"startTime": "2026-09-10T10:03:00Z", "value": 1230.0},
+        {"startTime": "2026-09-10T10:06:00Z", "value": 1260.0},
+        {"startTime": "2026-09-10T10:15:00Z", "value": 1400.0},
+    ])
+
+    # Default cautious lag = 30m after quarter end (10:00..10:15 -> usable at 10:45)
+    df_30 = resample_3min_to_quarter_hour(raw, spec_wind, rt_lag_minutes=30)
+    assert len(df_30) == 2
+    assert df_30.loc[0, "value"] == pytest.approx(1230.0)
+    assert df_30.loc[0, "first_usable_origin_utc"] == pd.Timestamp("2026-09-10T10:45:00Z")
+
+    # Optional 10m lag (10:00..10:15 -> usable at 10:25)
+    df_10 = resample_3min_to_quarter_hour(raw, spec_wind, rt_lag_minutes=10)
+    assert df_10.loc[0, "first_usable_origin_utc"] == pd.Timestamp("2026-09-10T10:25:00Z")
+
