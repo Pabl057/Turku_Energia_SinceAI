@@ -18,7 +18,14 @@ def test_gitignore_blocks_data_csv_and_parquet() -> None:
     assert gitignore_path.exists(), ".gitignore is missing"
     lines = [line.strip() for line in gitignore_path.read_text(encoding="utf-8").splitlines()]
 
-    for required_pattern in ("/data/", "/data/*.csv", "/data/*.parquet"):
+    for required_pattern in (
+        "/data/",
+        "/data/*.csv",
+        "/data/*.parquet",
+        "/baseline_output/",
+        "/results/",
+        "/graphify-out/",
+    ):
         assert required_pattern in lines, f"Missing required .gitignore pattern: {required_pattern}"
 
     protected_paths = [
@@ -26,6 +33,9 @@ def test_gitignore_blocks_data_csv_and_parquet() -> None:
         "data/inputs.parquet",
         "data/inputs.csv",
         "data/actuals_validation.csv",
+        "baseline_output/validation/forecast_backtest.csv",
+        "results/validation/forecast_backtest.csv",
+        "graphify-out/graph.json",
     ]
     for rel_path in protected_paths:
         res = subprocess.run(
@@ -38,14 +48,15 @@ def test_gitignore_blocks_data_csv_and_parquet() -> None:
 
 def test_git_index_does_not_track_licensed_or_raw_data_files() -> None:
     """Verify git ls-files and git status report zero tracked or staged files under data/ or spot_nordpool.csv."""
-    ls_data = subprocess.run(
-        ["git", "ls-files", "data/"],
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert ls_data.stdout.strip() == "", f"Tracked files found under data/: {ls_data.stdout}"
+    for forbidden_dir in ("data/", "baseline_output/", "results/", "graphify-out/"):
+        ls_dir = subprocess.run(
+            ["git", "ls-files", forbidden_dir],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert ls_dir.stdout.strip() == "", f"Tracked files found under {forbidden_dir}: {ls_dir.stdout}"
 
     status_data = subprocess.run(
         ["git", "status", "--porcelain", "data/"],

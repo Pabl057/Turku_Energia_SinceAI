@@ -5,6 +5,15 @@
 venv/
 .venv/
 
+
+# Generated evaluation outputs, local caches, and API secrets
+/baseline_output/
+/results/
+/graphify-out/
+.secrets/
+*.env
+/data_cache/
+/organizer_only/
 # Created by https://www.toptal.com/developers/gitignore/api/windows,macos,visualstudiocode,python,jetbrains
 # Edit at https://www.toptal.com/developers/gitignore?templates=windows,macos,visualstudiocode,python,jetbrains
 
