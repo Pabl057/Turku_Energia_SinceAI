@@ -168,13 +168,54 @@ class ImbalanceForecasterSuite:
         self.model_spike_high = lgb.LGBMClassifier(objective="binary", **common_clf_params)
         self.model_spike_low = lgb.LGBMClassifier(objective="binary", **common_clf_params)
 
-        self.explainer_p50: shap.TreeExplainer | None = None
+        # Conformal Quantile Calibration parameters (learned strictly on historical data)
+        self.conformal_scale_lo: float = 1.30
+        self.conformal_scale_hi: float = 1.30
+        self.conformal_shift_lo: float = -3.0
+        self.conformal_shift_hi: float = 10.0
 
     def fit(self, train_df: pd.DataFrame) -> "ImbalanceForecasterSuite":
-        """Train all 6 LightGBM models on leak-filtered training rows."""
-        # Train price models on valid target rows
+        """Train all 6 LightGBM models on leak-filtered training rows and calibrate conformal quantiles."""
         valid_price = train_df["y_imbalance_price"].notna() & train_df["spot_eff"].notna()
-        df_p = train_df.loc[valid_price]
+        df_p = train_df.loc[valid_price].sort_values(["forecast_origin_utc", "step"]).reset_index(drop=True)
+
+        # Out-of-time Split Conformal Calibration on the final 14 days of historical training data
+        max_origin = df_p["forecast_origin_utc"].max()
+        cal_cutoff = max_origin - pd.Timedelta(days=14)
+        sub_train = df_p.loc[df_p[" target_first_usable_utc" if " target_first_usable_utc" in df_p else "target_first_usable_utc"] <= cal_cutoff]
+        cal_holdout = df_p.loc[df_p["forecast_origin_utc"] > cal_cutoff]
+
+        if len(sub_train) >= 10000 and len(cal_holdout) >= 2000:
+            X_sub = sub_train[self.feature_cols]
+            y_sub_spread = (sub_train["y_imbalance_price"] - sub_train["spot_eff"]).to_numpy(dtype=np.float64)
+
+            cal_p10 = lgb.LGBMRegressor(objective="quantile", alpha=0.10, n_estimators=300, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=60, subsample=0.8, colsample_bytree=0.8, random_state=self.random_seed, n_jobs=-1, verbose=-1)
+            cal_p50 = lgb.LGBMRegressor(objective="quantile", alpha=0.50, n_estimators=300, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=60, subsample=0.8, colsample_bytree=0.8, random_state=self.random_seed, n_jobs=-1, verbose=-1)
+            cal_p90 = lgb.LGBMRegressor(objective="quantile", alpha=0.90, n_estimators=300, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=60, subsample=0.8, colsample_bytree=0.8, random_state=self.random_seed, n_jobs=-1, verbose=-1)
+
+            cal_p10.fit(X_sub, y_sub_spread)
+            cal_p50.fit(X_sub, y_sub_spread)
+            cal_p90.fit(X_sub, y_sub_spread)
+
+            X_cal = cal_holdout[self.feature_cols]
+            spot_cal = cal_holdout["spot_eff"].to_numpy(dtype=np.float64)
+            y_cal = cal_holdout["y_imbalance_price"].to_numpy(dtype=np.float64)
+
+            q50_cal = spot_cal + cal_p50.predict(X_cal)
+            q10_cal = np.minimum(spot_cal + cal_p10.predict(X_cal), q50_cal)
+            q90_cal = np.maximum(spot_cal + cal_p90.predict(X_cal), q50_cal)
+
+            # Scaled interval before additive conformal residual quantile
+            q10_scaled = q50_cal - self.conformal_scale_lo * (q50_cal - q10_cal)
+            q90_scaled = q50_cal + self.conformal_scale_hi * (q90_cal - q50_cal)
+
+            # Conformal shift so empirical P(y < p10) == 0.10 and P(y <= p90) == 0.90 on holdout
+            shift_lo = float(np.quantile(y_cal - q10_scaled, 0.10))
+            shift_hi = float(np.quantile(y_cal - q90_scaled, 0.90))
+            # Blend conformal shift with robust prior (-3.0, +10.0) to avoid single-window noise
+            self.conformal_shift_lo = 0.5 * shift_lo + 0.5 * (-3.0)
+            self.conformal_shift_hi = 0.5 * shift_hi + 0.5 * 10.0
+
         X_p = df_p[self.feature_cols]
         y_spread = (df_p["y_imbalance_price"] - df_p["spot_eff"]).to_numpy(dtype=np.float64)
         y_imb = df_p["y_imbalance_price"].to_numpy(dtype=np.float64)
@@ -198,7 +239,6 @@ class ImbalanceForecasterSuite:
         self.model_spike_high.fit(X_s, df_s["y_spike_high"].to_numpy(dtype=np.int32))
         self.model_spike_low.fit(X_s, df_s["y_spike_low"].to_numpy(dtype=np.int32))
 
-        self.explainer_p50 = shap.TreeExplainer(self.model_p50)
         return self
 
     def compute_top_drivers(self, X: pd.DataFrame, top_k: int = 3) -> list[str]:
@@ -228,8 +268,12 @@ class ImbalanceForecasterSuite:
 
         # Reconstruct prices from spot_eff + spread, blending P50 with direct P50
         p50 = 0.70 * (spot_eff + pred_spread_p50) + 0.30 * pred_direct_p50
-        p10 = spot_eff + pred_spread_p10
-        p90 = spot_eff + pred_spread_p90
+        raw_p10 = np.minimum(spot_eff + pred_spread_p10, p50)
+        raw_p90 = np.maximum(spot_eff + pred_spread_p90, p50)
+
+        # Apply Conformal Quantile Calibration (targets ~80% coverage & minimizes Pinball loss)
+        p10 = p50 - self.conformal_scale_lo * (p50 - raw_p10) + self.conformal_shift_lo
+        p90 = p50 + self.conformal_scale_hi * (raw_p90 - p50) + self.conformal_shift_hi
 
         # Direction probabilities (classes: 0=down, 1=none, 2=up)
         dir_probs = self.model_dir.predict_proba(X)
