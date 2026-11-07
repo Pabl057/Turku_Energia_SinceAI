@@ -2,7 +2,7 @@
 
 **Since AI Hackathon 2026 (6–8 Nov 2026, Turku)** · Schema Version `1.0`
 
-Welcome to the documentation hub for our end-to-end **10-hour (40 quarter-hour) probabilistic imbalance price forecasting** and **Level 2 Situational Awareness & Time Machine** solution for Turku Energia.
+Welcome to the documentation hub for our end-to-end **10-hour (40 quarter-hour) probabilistic imbalance price forecasting**, **Birnbaum Reliability & TreeSHAP XAI**, and **Level 2 Situational Awareness & Time Machine** solution for Turku Energia.
 
 ---
 
@@ -10,29 +10,29 @@ Welcome to the documentation hub for our end-to-end **10-hour (40 quarter-hour) 
 
 ```mermaid
 flowchart LR
-    subgraph DATA["1. Starter Package Data (first_usable_origin_utc <= t)"]
-        D1["Fingrid Open Data (CC BY 4.0)<br/>Imbalance, mFRR/aFRR, Load & Wind/Solar DA"]
+    subgraph DATA["1. Starter + Extended Fingrid Data (first_usable_origin_utc <= t)"]
+        D1["Fingrid Open Data (CC BY 4.0)<br/>Imbalance, mFRR/aFRR + RT 181/188/191/177 & Pre-June Buffer"]
         D2["ENTSO-E Transparency (CC BY 4.0)<br/>SE1/SE3/EE Imbalance, Load & FI-EE Capacity"]
         D3["Nord Pool Day-Ahead Spot (Licensed)<br/>fi_spot_price (Published D-1 14:00 EET/EEST)"]
     end
 
-    subgraph FEAT["2. Anti-Leakage FeatureStore (181 Features)"]
+    subgraph FEAT["2. Anti-Leakage FeatureStore (197 Features)"]
         F1["Target-Delivery Forward Features (38)<br/>Spot Price, Residual Load & 1h/3h Wind Ramps"]
-        F2["Real-Time Grid Inertia Lags (96)<br/>30m Load Error/Flows & 60m Imbalance/mFRR/aFRR"]
+        F2["Real-Time Grid Inertia & Volume-Pricing Lags (112)<br/>30m RT Wind/Nuclear/Load & 60m Implied aFRR/mFRR"]
         F3["Regional Contagion & Horizon Decay (47)<br/>120m SE1/SE3/EE Spreads + Diurnal/Calendar"]
     end
 
-    subgraph MODEL["3. Calibrated LightGBM Suite + TreeSHAP"]
-        M1["p50 Point Forecast<br/>Full + Short-Horizon L1 Spread Blend"]
+    subgraph MODEL["3. Calibrated 9-Model LightGBM Suite + TreeSHAP & Birnbaum XAI"]
+        M1["p50 Point Forecast<br/>Dual-Depth Adaptive Stacking (60/40) + Short-Horizon L1"]
         M2["p10 / p90 Quantiles<br/>Split Conformal Dispersion Scaling (80.0% Cov)"]
-        M3["p_spike_high / p_spike_low<br/>GBDT Classifier + Parametric Tail Blend"]
+        M3["p_spike_high / p_spike_low<br/>GBDT + Tail Blend + Physical Direction Coupling"]
         M4["p_up / p_down / p_none<br/>Multiclass GBDT + Empirical Bayes Shrinkage"]
-        M5["Exact TreeSHAP Explainer<br/>Per-Row top_drivers Attribution"]
+        M5["TreeSHAP & Birnbaum Reliability XAI<br/>Per-Row top_drivers + I_B / I_CR / I_FV Risk Shares"]
     end
 
     subgraph OUT["4. Deliverables & Decision Support"]
         O1["forecast_backtest.csv<br/>26,920 Rows (673 Origins × 40 Steps)"]
-        O2["Level 2 Streamlit Dashboard<br/>Situational Alerts & Historical Time Machine"]
+        O2["Level 2 Streamlit Dashboard<br/>Situational Desk · Birnbaum XAI · Ablation & Wilcoxon Proof"]
     end
 
     DATA --> FEAT --> MODEL --> OUT
@@ -42,13 +42,13 @@ flowchart LR
 
 ## Validation Benchmark Summary (`7 Sep – 4 Oct 2026`)
 
-| Criterion | Weight | Official Baseline | Our Solution | Improvement |
-| :--- | :---: | ---: | ---: | ---: |
-| **MAE on `p50` (EUR/MWh)** | **30% of L1** | 66.2033 | **43.3463** | **-34.53%** (`-22.86 EUR/MWh`) |
-| **Mean Pinball Loss (`p10`, `p90`)** | **20% of L1** | 24.1776 | **12.4336** | **-48.57%** |
-| **Empirical P10–P90 Coverage** *(target 80%)* | — | 68.29% | **80.00%** | **Exact 80.0% target** |
-| **Mean Brier Score, Spikes (`±50 EUR`)** | **20% of L1** | 0.1132 | **0.0943** | **-16.64%** |
-| **3-Class Brier Score, Direction** | **10% of L1** | 0.4509 | **0.4132** | **-8.36%** |
+| Criterion | Weight | Official Baseline | Our Solution | Improvement | Statistical Proof (Paired $t$ / Wilcoxon) |
+| :--- | :---: | ---: | ---: | :--- | :--- |
+| **MAE on `p50` (EUR/MWh)** | **30% of L1** | 66.2033 | **43.1873** | **-34.77%** (`-23.02 EUR/MWh`) | $t = 27.46,\ p < 10^{-100}\ (***)$ |
+| **Mean Pinball Loss (`p10`, `p90`)** | **20% of L1** | 24.1776 | **12.4383** | **-48.55%** | $t = 29.26,\ p < 10^{-100}\ (***)$ |
+| **Empirical P10–P90 Coverage** *(target 80%)* | — | 68.29% | **80.00%** | **Exact 80.0% target** | Split Conformal Dispersion Scaling |
+| **Mean Brier Score, Spikes (`±50 EUR`)** | **20% of L1** | 0.1132 | **0.0928** | **-18.02%** | $t = 37.87,\ p < 10^{-100}\ (***)$ |
+| **3-Class Brier Score, Direction** | **10% of L1** | 0.4509 | **0.4080** | **-9.51%** | $t = 32.95,\ p < 10^{-100}\ (***)$ |
 
 ---
 

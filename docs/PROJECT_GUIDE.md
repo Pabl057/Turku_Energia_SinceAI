@@ -240,9 +240,9 @@ Vor dem Speichern von `../forecast_backtest.csv` werden die Regeln erzwungen und
 - [x] **Python-Umgebung (`../venv`)** mit Python 3.12, `lightgbm`, `shap`, `pandas`, `numpy`, `scikit-learn`, `jupyter`, `streamlit`, `plotly` installiert.
 - [x] **Datenstruktur (`../data`)** sauber konsolidiert und in `../.gitignore` vor versehentlichem Upload geschützt.
 - [x] **Meilenstein 1 (Level 1 Pipeline):**
-  1. `../src/data/loader.py` & `src/features/build_features.py` erstellt (181 Anti-Leakage Features).
-  2. Die LightGBM-Modell-Suite (inkl. Short-Horizon Specialists, Split Conformal Quantile Calibration & Empirical Bayes Brier-Kalibrierung) in `../src/models/train.py` auf der Validierungsperiode trainiert (`MAE: 43.35 €/MWh` vs. Baseline `66.20 €/MWh`; `Pinball: 12.43` vs. Baseline `24.18`; `Spike Brier: 0.0943` vs. `0.1132`; `Direction Brier: 0.4132` vs. `0.4509`; `Coverage: 80.00%`).
+  1. `../src/data/loader.py`, `src/data/extra_data.py` & `src/features/build_features.py` erstellt (**197 Anti-Leakage Features** inkl. 3-Min Fingrid-RT Wind/Nuklear & Pre-June Regulierungs-Puffer).
+  2. Die 9-Modell LightGBM-Suite (inkl. Dual-Depth Adaptive Stacking nach Eq. 6, Short-Horizon Specialists, Split Conformal Quantile Calibration, Physical Spike-Direction Coupling & Empirical Bayes Brier-Kalibrierung) in `../src/models/train.py` auf der Validierungsperiode trainiert (`MAE: 43.19 €/MWh` vs. Baseline `66.20 €/MWh`; `Pinball: 12.44` vs. Baseline `24.18`; `Spike Brier: 0.0928` vs. `0.1132`; `Direction Brier: 0.4080` vs. `0.4509`; `Coverage: 80.00%`; statistisch hochsignifikant mit $p < 10^{-100}$ im Paired t-Test & Wilcoxon Signed-Rank Test).
   3. Valide `../forecast_backtest.csv` (26.920 Zeilen, `VALIDATION PASSED`) generiert.
-- [x] **Meilenstein 2 (Level 2 Dashboard in `../apps/dashboard.py`):**
-  1. Interaktives Dashboard mit Warn-Alerts bei `p_spike_high >= 0.3` / `p_spike_low >= 0.3` und Revisions-Tracking.
-  2. „Time Machine“-Auswahl zum Durchklicken aller 673 Test- und 672 Validierungs-Origins inkl. `top_drivers` (TreeSHAP) und JSON-API-Export.
+- [x] **Meilenstein 2 (Level 2 Dashboard & XAI in `../apps/dashboard.py`):**
+  1. Interaktives Dashboard mit Warn-Alerts bei `p_spike_high >= 0.3` / `p_spike_low >= 0.3`, Revisions-Tracking und integriertem **AI Assistant Copilot** (`apps/ai_assistant.py`).
+  2. „Time Machine“-Auswahl zum Durchklicken aller 673 Test- und 672 Validierungs-Origins inkl. `top_drivers` (TreeSHAP), **Temporal Horizon × Driver Attention Heatmap (Steps 1–40)**, **Birnbaum Reliability Importance ($I_B, I_{CR}, I_{FV}$)**, **Ablationsstudie**, **Paired t-Test / Wilcoxon Signifikanz-Nachweis**, **45° Kalibrierungs-Scatter** und JSON-API-Export.

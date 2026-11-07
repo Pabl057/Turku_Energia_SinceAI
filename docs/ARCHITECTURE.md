@@ -8,32 +8,32 @@ This document visualizes the end-to-end software, data, and machine learning arc
 
 ```mermaid
 flowchart TB
-    subgraph DATA_LAYER["1. Data & Availability Layer (data/ + src/data/loader.py)"]
-        INP["data/inputs.parquet & inputs.csv<br/>Fingrid + ENTSO-E + Calendar (30 series)"]
+    subgraph DATA_LAYER["1. Data & Availability Layer (data/ + src/data/loader.py + extra_data.py)"]
+        INP["data/inputs.parquet & extra_inputs.parquet<br/>Fingrid (incl. RT 181/188/191/177 & Pre-June Buffer) + ENTSO-E + Calendar"]
         SPOT["data/spot_nordpool.csv<br/>Nord Pool Day-Ahead Spot (fi_spot_price)"]
         ORIG["data/forecast_origins.csv<br/>673 Hourly Test Origins (5 Oct – 1 Nov 2026)"]
         ACT["data/actuals_validation.csv<br/>Validation Ground Truth (7 Sep – 4 Oct 2026)"]
-        LOAD["src/data/loader.py<br/>load_all_data() · rows_available_at()"]
+        LOAD["src/data/loader.py + extra_data.py<br/>load_all_data() · rows_available_at()"]
         INP & SPOT --> LOAD
     end
 
     subgraph FEAT_LAYER["2. Anti-Leakage Feature Engine (src/features/build_features.py)"]
         FS["FeatureStore Dual-Matrix Index<br/>val_wide (Values) + fu_wide (first_usable_origin_utc)"]
         F_FWD["Target-Delivery Forward Features (38)<br/>spot_at_delivery · wind/solar/load DA · 1h/3h ramps"]
-        F_60["60-Min Balancing Lags (64)<br/>last_imbalance_spread · mFRR/aFRR spreads · rolling stats"]
-        F_30["30-Min Grid Flow & Error Lags (32)<br/>cons_forecast_error_30m · net_import_30m · border flows"]
+        F_60["60-Min Balancing & Volume-Pricing Lags (73)<br/>last_imbalance_spread · implied aFRR/mFRR weights & volumes"]
+        F_30["30-Min Grid Flow, Wind/Nuclear RT & Error Lags (39)<br/>wind_rt_error · nuclear_rt_ramp · cons_forecast_error_30m · border flows"]
         F_120["120-Min Regional & Diurnal Lags (47)<br/>SE1/SE3/EE spreads · 24h/168h lags · horizon decay"]
-        BF["build_feature_Frame(store, origins, target_cutoff_utc)<br/>181 Leak-Free Features + Target Masks + data_cutoff_utc"]
+        BF["build_feature_Frame(store, origins, target_cutoff_utc)<br/>197 Leak-Free Features + Target Masks + data_cutoff_utc"]
         LOAD --> FS --> F_FWD & F_60 & F_30 & F_120 --> BF
     end
 
     subgraph MODEL_LAYER["3. Walk-Forward LightGBM Suite & Calibration (src/models/train.py)"]
         WF["walk_forward_predict()<br/>Expanding 7-Day Retraining (target_fu_utc <= cur)"]
-        MP50["m_p50 + m_p50_short<br/>L1 Spread Regressors (Steps 1–40 + Steps 1–8 Blend)"]
+        MP50["m_p50 + m_p50_deep + m_p50_short<br/>Dual-Depth Adaptive Stacking (60/40) + Short-Horizon L1"]
         MPQ["m_p10 + m_p90 + Conformal Scaling<br/>Quantile GBDT + Split Conformal Dispersion (80.0% Cov)"]
-        MSPIKE["m_spike_high + m_spike_low<br/>Binary GBDT (w=0.45) + Parametric Gaussian Tail (w=0.55)"]
+        MSPIKE["m_spike_high + m_spike_low + Direction Coupling<br/>Binary GBDT (w=0.45) + Gaussian Tail (w=0.55) + Regime Coupling"]
         MDIR["m_dir + m_dir_short<br/>3-Class GBDT + Empirical Bayes Prior Shrinkage"]
-        SHAP["Exact TreeSHAP Explainer<br/>pred_contrib=True -> Top-3 Deduplicated top_drivers"]
+        SHAP["Exact TreeSHAP & Birnbaum Reliability XAI<br/>pred_contrib=True -> Top-3 top_drivers + I_B / I_CR / I_FV"]
         POST["apply_temporal_ensembling() +<br/>enforce_prediction_constraints()"]
         BF --> WF --> MP50 & MPQ & MSPIKE & MDIR & SHAP --> POST
     end

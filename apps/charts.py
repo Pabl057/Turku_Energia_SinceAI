@@ -15,14 +15,15 @@ Supports both Control-Room Dark Mode (`dark_mode=True`, default) and Clean Light
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from apps.theme import TE_COLORS, format_driver_name
 
-FONT_FAMILY = "'Fira Sans', 'Franklin Gothic Book', sans-serif"
-HEADING_FONT = "'Fira Sans Extra Condensed', sans-serif"
+FONT_FAMILY = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif"
+HEADING_FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif"
 
 
 def _apply_te_layout(
@@ -31,14 +32,14 @@ def _apply_te_layout(
     title: str | None = None,
     dark_mode: bool = True,
 ) -> go.Figure:
-    """Apply consistent Turku Energia Dark or Light styling to a Plotly figure."""
-    paper_bg = "#0D1E2E" if dark_mode else TE_COLORS["white"]
-    plot_bg = "#091622" if dark_mode else TE_COLORS["white"]
-    text_col = "#E6F3F8" if dark_mode else TE_COLORS["navy"]
-    grid_col = "#152C42" if dark_mode else "#EAF7FB"
-    line_col = "#244766" if dark_mode else TE_COLORS["ice_blue"]
-    zero_col = "#2E577B" if dark_mode else TE_COLORS["stone"]
-    legend_bg = "rgba(13, 30, 46, 0.88)" if dark_mode else "rgba(255, 255, 255, 0.92)"
+    """Apply consistent Apple Design Dark or Light styling to a Plotly figure."""
+    paper_bg = "rgba(24, 30, 42, 0.55)" if dark_mode else "rgba(255, 255, 255, 0.85)"
+    plot_bg = "rgba(12, 16, 24, 0.45)" if dark_mode else "rgba(248, 248, 250, 0.65)"
+    text_col = "#E5E5EA" if dark_mode else "#1D1D1F"
+    grid_col = "rgba(255, 255, 255, 0.06)" if dark_mode else "rgba(0, 0, 0, 0.05)"
+    line_col = "rgba(255, 255, 255, 0.10)" if dark_mode else "rgba(0, 0, 0, 0.08)"
+    zero_col = "rgba(255, 255, 255, 0.16)" if dark_mode else "rgba(0, 0, 0, 0.12)"
+    legend_bg = "rgba(24, 30, 42, 0.75)" if dark_mode else "rgba(255, 255, 255, 0.88)"
 
     layout_kwargs: dict = dict(
         height=height,
@@ -47,11 +48,11 @@ def _apply_te_layout(
         font=dict(family=FONT_FAMILY, color=text_col, size=12),
         hovermode="x unified",
         hoverlabel=dict(
-            bgcolor="#0B1D2C" if dark_mode else TE_COLORS["navy"],
+            bgcolor="#1C1C1E" if dark_mode else "#1D1D1F",
             font_size=12,
             font_family=FONT_FAMILY,
             font_color="#FFFFFF",
-            bordercolor=TE_COLORS["orange"],
+            bordercolor="#FF9F0A",
         ),
         legend=dict(
             orientation="h",
@@ -480,3 +481,291 @@ def build_horizon_benchmark_chart(
     fig.update_yaxes(title_text="€/MWh (lower = better)", row=1, col=1)
     fig.update_yaxes(title_text="Pinball Loss (lower = better)", row=1, col=2)
     return fig
+
+
+def build_temporal_driver_heatmap(
+    origin_df: pd.DataFrame,
+    dark_mode: bool = True,
+) -> go.Figure | None:
+    """Build Temporal Horizon x Driver Dominance Heatmap (Steps 1-40, Fig. 11 of Huang et al., 2024).
+
+    Visualizes how feature attribution shifts from real-time inertia (Steps 1-8 / Hours 1-2)
+    to forward Day-Ahead fundamental ramps and Fourier harmonics (Steps 9-40 / Hours 3-10).
+    """
+    if "top_drivers" not in origin_df.columns or origin_df.empty:
+        return None
+
+    steps = origin_df["step"].astype(int).tolist()
+    driver_step_scores: dict[str, list[float]] = {}
+
+    # First pass: collect all unique top drivers across the 40 steps
+    all_drivers: dict[str, float] = {}
+    parsed_per_step: list[list[tuple[str, float]]] = []
+    for _, row in origin_df.iterrows():
+        raw_str = str(row.get("top_drivers", ""))
+        step_items: list[tuple[str, float]] = []
+        for rank, token in enumerate(raw_str.split(";")[:3], start=1):
+            clean = token.strip()
+            if clean:
+                lbl = format_driver_name(clean)
+                score = float(4 - rank)  # Rank 1 = 3.0, Rank 2 = 2.0, Rank 3 = 1.0
+                step_items.append((lbl, score))
+                all_drivers[lbl] = all_drivers.get(lbl, 0.0) + score
+        parsed_per_step.append(step_items)
+
+    if not all_drivers:
+        return None
+
+    top_drivers = [k for k, _ in sorted(all_drivers.items(), key=lambda x: -x[1])[:8]][::-1]
+    for d in top_drivers:
+        driver_step_scores[d] = [0.0] * len(steps)
+
+    for s_idx, items in enumerate(parsed_per_step):
+        for lbl, sc in items:
+            if lbl in driver_step_scores:
+                driver_step_scores[lbl][s_idx] = sc
+
+    z_matrix = np.array([driver_step_scores[d] for d in top_drivers], dtype=float)
+    # Smooth slightly across adjacent 15-min steps for visual continuity (like attention weights)
+    if z_matrix.shape[1] >= 3:
+        kernel = np.array([0.2, 0.6, 0.2])
+        for r_i in range(z_matrix.shape[0]):
+            z_matrix[r_i] = np.convolve(z_matrix[r_i], kernel, mode="same")
+
+    colorscale = (
+        [
+            [0.0, "#091622"],
+            [0.35, "#143B5A"],
+            [0.70, TE_COLORS["turquoise"]],
+            [1.0, TE_COLORS["orange"]],
+        ]
+        if dark_mode
+        else [
+            [0.0, "#F4FAFC"],
+            [0.35, TE_COLORS["ice_blue"]],
+            [0.70, TE_COLORS["turquoise"]],
+            [1.0, TE_COLORS["orange"]],
+        ]
+    )
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z_matrix,
+            x=[f"S{s}" for s in steps],
+            y=top_drivers,
+            colorscale=colorscale,
+            colorbar=dict(
+                title=dict(text="SHAP Attention", font=dict(size=11)),
+                thickness=14,
+            ),
+            hovertemplate="Step: <b>%{x}</b><br>Driver: <b>%{y}</b><br>Dominance Weight: <b>%{z:.2f}</b><extra></extra>",
+        )
+    )
+    _apply_te_layout(fig, height=340, dark_mode=dark_mode)
+    fig.update_xaxes(title_text="Forecast Horizon Quarter-Hour Steps (S1 = +15m ... S40 = +10h)")
+    return fig
+
+
+def build_birnbaum_reliability_chart(
+    birnbaum_df: pd.DataFrame,
+    dark_mode: bool = True,
+) -> go.Figure:
+    """Build grouped horizontal bar chart of Birnbaum (I_B), Criticality (I_CR), and Fussell-Vesely (I_FV)."""
+    df_plot = birnbaum_df.iloc[::-1].copy()
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            y=df_plot["Grid Subsystem"],
+            x=df_plot["Birnbaum Importance (I_B)"],
+            name="Birnbaum Structural Sensitivity (I_B)",
+            orientation="h",
+            marker_color=TE_COLORS["turquoise"],
+            hovertemplate="<b>%{y}</b><br>Birnbaum I_B: <b>%{x:.1%}</b><extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            y=df_plot["Grid Subsystem"],
+            x=df_plot["Criticality Importance (I_CR)"],
+            name="Criticality Importance (I_CR)",
+            orientation="h",
+            marker_color=TE_COLORS["orange"],
+            hovertemplate="<b>%{y}</b><br>Criticality I_CR: <b>%{x:.1%}</b><extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            y=df_plot["Grid Subsystem"],
+            x=df_plot["Fussell-Vesely Share (I_FV)"],
+            name="Fussell-Vesely Risk Share (I_FV)",
+            orientation="h",
+            marker_color=TE_COLORS["lime"],
+            hovertemplate="<b>%{y}</b><br>Fussell-Vesely I_FV: <b>%{x:.1%}</b><extra></extra>",
+        )
+    )
+
+    _apply_te_layout(fig, height=360, dark_mode=dark_mode)
+    fig.update_layout(barmode="group")
+    fig.update_xaxes(title_text="Importance / Risk Contribution Share", tickformat=".0%")
+    return fig
+
+
+def build_calibration_scatter_chart(
+    val_sub: pd.DataFrame,
+    val_wide: pd.DataFrame,
+    dark_mode: bool = True,
+) -> go.Figure | None:
+    """Build 45° Predicted vs. Actual Calibration Scatter & Quantile Band Verification (Fig. 10, Huang et al., 2024)."""
+    if val_sub is None or val_sub.empty or "fi_imbalance_price" not in val_wide.columns:
+        return None
+
+    df = val_sub.copy()
+    deliv_idx = pd.DatetimeIndex(df["delivery_start_utc"])
+    df["actual"] = val_wide["fi_imbalance_price"].reindex(deliv_idx).to_numpy()
+    df = df.dropna(subset=["actual", "p50", "p10", "p90"])
+    if df.empty:
+        return None
+
+    # Subsample deterministically for fast interactive rendering (up to 1,800 points)
+    if len(df) > 1800:
+        df = df.iloc[:: max(1, len(df) // 1800)].copy()
+
+    inside_band = (df["actual"] >= df["p10"]) & (df["actual"] <= df["p90"])
+    df_in = df[inside_band]
+    df_out = df[~inside_band]
+
+    q_lo = float(np.nanpercentile(df["actual"], 1))
+    q_hi = float(np.nanpercentile(df["actual"], 99))
+    lim_min = max(-250.0, q_lo - 20.0)
+    lim_max = min(600.0, q_hi + 20.0)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scattergl(
+            x=df_in["actual"],
+            y=df_in["p50"],
+            mode="markers",
+            name="Inside P10–P90 Band (80.0% Target)",
+            marker=dict(color=TE_COLORS["turquoise"], size=5, opacity=0.55),
+            hovertemplate="Actual: <b>%{x:.1f} €</b><br>Predicted P50: <b>%{y:.1f} €</b><extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scattergl(
+            x=df_out["actual"],
+            y=df_out["p50"],
+            mode="markers",
+            name="Extreme Tail Outside P10–P90 (20.0%)",
+            marker=dict(color=TE_COLORS["berry"], size=5, opacity=0.65, symbol="diamond"),
+            hovertemplate="Actual: <b>%{x:.1f} €</b><br>Predicted P50: <b>%{y:.1f} €</b><extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[lim_min, lim_max],
+            y=[lim_min, lim_max],
+            mode="lines",
+            name="Ideal 45° Calibration Line (y = x)",
+            line=dict(color=TE_COLORS["orange"], width=2.5, dash="dash"),
+        )
+    )
+
+    _apply_te_layout(fig, height=360, dark_mode=dark_mode)
+    fig.update_xaxes(title_text="Realized Imbalance Price (€/MWh)", range=[lim_min, lim_max])
+    fig.update_yaxes(title_text="Predicted P50 Imbalance Price (€/MWh)", range=[lim_min, lim_max])
+    return fig
+
+
+def build_price_waterfall_chart(
+    info: dict,
+    dark_mode: bool = True,
+) -> go.Figure:
+    """Build a crystal-clear Waterfall chart showing how Day-Ahead Spot + 3 SHAP Drivers = Predicted P50."""
+    labels = [
+        "Day-Ahead Spot",
+        f"#1 {info['drivers'][0][0][:24]}",
+        f"#2 {info['drivers'][1][0][:24]}",
+        f"#3 {info['drivers'][2][0][:24]}",
+        "Predicted P50",
+    ]
+    values = [
+        info["spot"],
+        info["drivers"][0][1],
+        info["drivers"][1][1],
+        info["drivers"][2][1],
+        0.0,
+    ]
+    measures = ["absolute", "relative", "relative", "relative", "total"]
+    text_vals = [
+        f"{info['spot']:.1f} €",
+        f"{info['drivers'][0][1]:+.1f} €",
+        f"{info['drivers'][1][1]:+.1f} €",
+        f"{info['drivers'][2][1]:+.1f} €",
+        f"{info['p50']:.1f} €",
+    ]
+
+    fig = go.Figure(
+        go.Waterfall(
+            name="P50 Decomposition",
+            orientation="v",
+            measure=measures,
+            x=labels,
+            y=values,
+            text=text_vals,
+            textposition="outside",
+            connector=dict(line=dict(color="#46BEDC" if dark_mode else TE_COLORS["navy"], width=1.5, dash="dot")),
+            increasing=dict(marker=dict(color=TE_COLORS["orange"])),
+            decreasing=dict(marker=dict(color=TE_COLORS["turquoise"])),
+            totals=dict(marker=dict(color=TE_COLORS["lime"] if dark_mode else TE_COLORS["navy"])),
+            hovertemplate="<b>%{x}</b><br>Contribution: <b>%{text}</b><extra></extra>",
+        )
+    )
+    _apply_te_layout(fig, height=340, dark_mode=dark_mode)
+    fig.update_yaxes(title_text="Price (€/MWh)")
+    return fig
+
+
+def build_uncertainty_breakdown_chart(
+    info: dict,
+    dark_mode: bool = True,
+) -> go.Figure:
+    """Build a Waterfall chart showing why the P10-P90 uncertainty band is W €/MWh wide."""
+    comps = info["unc_components"]
+    labels = [
+        "Base Volatility",
+        f"Lead Time (S{info['step']})",
+        "Wind/Load Ramp",
+        "Spike Tail Risk",
+        "Total Band (P90−P10)",
+    ]
+    values = [comps[0][1], comps[1][1], comps[2][1], comps[3][1], 0.0]
+    measures = ["relative", "relative", "relative", "relative", "total"]
+    text_vals = [
+        f"+{comps[0][1]:.1f} €",
+        f"+{comps[1][1]:.1f} €",
+        f"+{comps[2][1]:.1f} €",
+        f"+{comps[3][1]:.1f} €",
+        f"{info['band_width']:.1f} €",
+    ]
+
+    fig = go.Figure(
+        go.Waterfall(
+            name="Uncertainty Breakdown",
+            orientation="v",
+            measure=measures,
+            x=labels,
+            y=values,
+            text=text_vals,
+            textposition="outside",
+            connector=dict(line=dict(color="#46BEDC" if dark_mode else TE_COLORS["navy"], width=1.5, dash="dot")),
+            increasing=dict(marker=dict(color=TE_COLORS["turquoise"])),
+            totals=dict(marker=dict(color=TE_COLORS["berry"])),
+            hovertemplate="<b>%{x}</b><br>Width Contribution: <b>%{text}</b><extra></extra>",
+        )
+    )
+    _apply_te_layout(fig, height=340, dark_mode=dark_mode)
+    fig.update_yaxes(title_text="Uncertainty Width (€/MWh)")
+    return fig
+
+
