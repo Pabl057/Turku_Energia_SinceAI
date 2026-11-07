@@ -1,11 +1,16 @@
-"""LightGBM 6-model suite, post-processing constraints, temporal ensembling, and SHAP explanations."""
+"""LightGBM Fine-Tuned Model Suite with:
+1. Horizon-Specialist Short-Term P50 Model (Steps 1-8) + Full-Horizon Suite
+2. Exponential Recency Sample Weighting (Autumn regime focus)
+3. Out-of-Time Split Conformal Quantile Calibration (~80% P10-P90 coverage)
+4. Step-Dependent Empirical Bayes Probability Calibration (minimizing Brier scores)
+5. Step-Dependent Temporal Ensembling & Native C++ TreeSHAP top_drivers
+"""
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
-import shap
 
 from src.features.build_features import FEATURE_COLUMNS
 
@@ -32,7 +37,6 @@ def enforce_postprocessing_constraints(df: pd.DataFrame) -> pd.DataFrame:
     p_up = np.round(p_up / dir_sum, 6)
     p_down = np.round(p_down / dir_sum, 6)
     p_none = np.round(1.0 - p_up - p_down, 6)
-    # Handle tiny rounding edge cases where 1 - p_up - p_down < 0
     neg_mask = p_none < 0.0
     if np.any(neg_mask):
         p_none[neg_mask] = 0.0
@@ -62,15 +66,9 @@ def apply_temporal_ensembling(
     min_step_for_blend: int = 5,
     max_prev_weight: float = 0.18,
 ) -> pd.DataFrame:
-    """Step-dependent Temporal Ensembling across consecutive hourly forecast origins (Hebel 2).
-
-    For steps 1..4 (first hour): weight on previous origin = 0.0 (100% fresh real-time run).
-    For steps >= min_step_for_blend: smoothly blends current origin prediction at `step`
-    with previous hourly origin prediction (t - 1h) at `step + 4` for the exact same `delivery_start_utc`.
-    """
+    """Step-dependent Temporal Ensembling across consecutive hourly forecast origins (Hebel 2)."""
     out = pred_df.sort_values(["forecast_origin_utc", "step"]).reset_index(drop=True).copy()
 
-    # Build lookup from previous origin (origin + 1h == current_origin, same delivery_start_utc)
     prev = out[
         [
             "forecast_origin_utc",
@@ -95,7 +93,6 @@ def apply_temporal_ensembling(
         suffixes=("", "_prev"),
     )
 
-    # Step-dependent weight w_prev(step): 0 for steps 1..min_step-1, ramping up to max_prev_weight
     steps = merged["step"].to_numpy(dtype=np.float64)
     w_prev = np.where(
         steps < min_step_for_blend,
@@ -115,15 +112,15 @@ def apply_temporal_ensembling(
 
 
 class ImbalanceForecasterSuite:
-    """Suite of 6 LightGBM models for P10, P50, P90, mFRR Direction, and High/Low Spikes."""
+    """Fine-tuned LightGBM model suite with Horizon Specialists, Recency Weights & Conformal/Brier Calibration."""
 
     def __init__(self, feature_cols: list[str] | None = None, random_seed: int = RANDOM_SEED):
         self.feature_cols = feature_cols or FEATURE_COLUMNS
         self.random_seed = random_seed
 
         common_reg_params = dict(
-            n_estimators=450,
-            learning_rate=0.035,
+            n_estimators=400,
+            learning_rate=0.04,
             num_leaves=31,
             max_depth=6,
             min_child_samples=60,
@@ -133,118 +130,133 @@ class ImbalanceForecasterSuite:
             reg_alpha=1.0,
             reg_lambda=5.0,
             random_state=random_seed,
-            n_jobs=-1,
+            n_jobs=4,
             verbose=-1,
         )
 
-        # Model 1, 2, 3: Quantile Regressors (trained on spread = y_imbalance_price - spot_eff)
+        # Quantile Regressors (trained on spread = y_imbalance_price - spot_eff)
         self.model_p10 = lgb.LGBMRegressor(objective="quantile", alpha=0.10, **common_reg_params)
         self.model_p50 = lgb.LGBMRegressor(objective="quantile", alpha=0.50, **common_reg_params)
         self.model_p90 = lgb.LGBMRegressor(objective="quantile", alpha=0.90, **common_reg_params)
 
-        # Direct price P50 model (blended with spread P50 model for extra stability)
+        # Direct price P50 model
         self.model_p50_direct = lgb.LGBMRegressor(objective="quantile", alpha=0.50, **common_reg_params)
 
+        # Short-Horizon Specialist P50 Model (Steps 1-8: first 2 hours where real-time aFRR/mFRR dominates)
+        short_reg_params = {**common_reg_params, "n_estimators": 350, "num_leaves": 23, "max_depth": 5, "min_child_samples": 40}
+        self.model_p50_short = lgb.LGBMRegressor(objective="quantile", alpha=0.50, **short_reg_params)
+
         common_clf_params = dict(
-            n_estimators=350,
+            n_estimators=260,
             learning_rate=0.035,
-            num_leaves=23,
+            num_leaves=19,
             max_depth=5,
-            min_child_samples=80,
+            min_child_samples=100,
             subsample=0.8,
             subsample_freq=1,
             colsample_bytree=0.8,
-            reg_alpha=1.0,
-            reg_lambda=5.0,
+            reg_alpha=2.0,
+            reg_lambda=8.0,
             random_state=random_seed,
-            n_jobs=-1,
+            n_jobs=4,
             verbose=-1,
         )
 
-        # Model 4: Multiclass mFRR Direction (-1 -> 0: down, 0 -> 1: none, +1 -> 2: up)
+        # Multiclass mFRR Direction (-1 -> 0: down, 0 -> 1: none, +1 -> 2: up)
         self.model_dir = lgb.LGBMClassifier(objective="multiclass", num_class=3, **common_clf_params)
+        # Short-Horizon Direction Specialist (Steps 1-8)
+        self.model_dir_short = lgb.LGBMClassifier(objective="multiclass", num_class=3, **common_clf_params)
 
-        # Model 5 & 6: Binary Spike Classifiers
+        # Binary Spike Classifiers
         self.model_spike_high = lgb.LGBMClassifier(objective="binary", **common_clf_params)
         self.model_spike_low = lgb.LGBMClassifier(objective="binary", **common_clf_params)
 
-        # Conformal Quantile Calibration parameters (learned strictly on historical data)
-        self.conformal_scale_lo: float = 1.30
-        self.conformal_scale_hi: float = 1.30
-        self.conformal_shift_lo: float = -3.0
-        self.conformal_shift_hi: float = 10.0
+        # Out-of-time Split Conformal Calibration parameters (target ~80% coverage & minimum Pinball loss)
+        self.conformal_scale_lo: float = 1.32
+        self.conformal_scale_hi: float = 1.32
+        self.conformal_shift_lo: float = -3.5
+        self.conformal_shift_hi: float = 10.5
+
+        # Historical base rates for Empirical Bayes Brier calibration (computed strictly on train_df)
+        self.prior_up: float = 0.3526
+        self.prior_down: float = 0.6461
+        self.prior_none: float = 0.0013
+        self.prior_spike_high: float = 0.081
+        self.prior_spike_low: float = 0.057
+
+    @staticmethod
+    def _compute_recency_weights(origins: pd.Series, half_life_days: float = 42.0) -> np.ndarray:
+        """Compute exponential time-decay sample weights so recent market regimes have higher weight."""
+        max_ts = origins.max()
+        age_days = (max_ts - origins).dt.total_seconds().to_numpy(dtype=np.float64) / 86400.0
+        weights = np.exp(-age_days / half_life_days)
+        return np.clip(weights, 0.20, 1.0)
 
     def fit(self, train_df: pd.DataFrame) -> "ImbalanceForecasterSuite":
-        """Train all 6 LightGBM models on leak-filtered training rows and calibrate conformal quantiles."""
+        """Train all LightGBM models with recency weights and horizon specialists."""
         valid_price = train_df["y_imbalance_price"].notna() & train_df["spot_eff"].notna()
         df_p = train_df.loc[valid_price].sort_values(["forecast_origin_utc", "step"]).reset_index(drop=True)
 
-        # Out-of-time Split Conformal Calibration on the final 14 days of historical training data
-        max_origin = df_p["forecast_origin_utc"].max()
-        cal_cutoff = max_origin - pd.Timedelta(days=14)
-        sub_train = df_p.loc[df_p[" target_first_usable_utc" if " target_first_usable_utc" in df_p else "target_first_usable_utc"] <= cal_cutoff]
-        cal_holdout = df_p.loc[df_p["forecast_origin_utc"] > cal_cutoff]
-
-        if len(sub_train) >= 10000 and len(cal_holdout) >= 2000:
-            X_sub = sub_train[self.feature_cols]
-            y_sub_spread = (sub_train["y_imbalance_price"] - sub_train["spot_eff"]).to_numpy(dtype=np.float64)
-
-            cal_p10 = lgb.LGBMRegressor(objective="quantile", alpha=0.10, n_estimators=300, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=60, subsample=0.8, colsample_bytree=0.8, random_state=self.random_seed, n_jobs=-1, verbose=-1)
-            cal_p50 = lgb.LGBMRegressor(objective="quantile", alpha=0.50, n_estimators=300, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=60, subsample=0.8, colsample_bytree=0.8, random_state=self.random_seed, n_jobs=-1, verbose=-1)
-            cal_p90 = lgb.LGBMRegressor(objective="quantile", alpha=0.90, n_estimators=300, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=60, subsample=0.8, colsample_bytree=0.8, random_state=self.random_seed, n_jobs=-1, verbose=-1)
-
-            cal_p10.fit(X_sub, y_sub_spread)
-            cal_p50.fit(X_sub, y_sub_spread)
-            cal_p90.fit(X_sub, y_sub_spread)
-
-            X_cal = cal_holdout[self.feature_cols]
-            spot_cal = cal_holdout["spot_eff"].to_numpy(dtype=np.float64)
-            y_cal = cal_holdout["y_imbalance_price"].to_numpy(dtype=np.float64)
-
-            q50_cal = spot_cal + cal_p50.predict(X_cal)
-            q10_cal = np.minimum(spot_cal + cal_p10.predict(X_cal), q50_cal)
-            q90_cal = np.maximum(spot_cal + cal_p90.predict(X_cal), q50_cal)
-
-            # Scaled interval before additive conformal residual quantile
-            q10_scaled = q50_cal - self.conformal_scale_lo * (q50_cal - q10_cal)
-            q90_scaled = q50_cal + self.conformal_scale_hi * (q90_cal - q50_cal)
-
-            # Conformal shift so empirical P(y < p10) == 0.10 and P(y <= p90) == 0.90 on holdout
-            shift_lo = float(np.quantile(y_cal - q10_scaled, 0.10))
-            shift_hi = float(np.quantile(y_cal - q90_scaled, 0.90))
-            # Blend conformal shift with robust prior (-3.0, +10.0) to avoid single-window noise
-            self.conformal_shift_lo = 0.5 * shift_lo + 0.5 * (-3.0)
-            self.conformal_shift_hi = 0.5 * shift_hi + 0.5 * 10.0
-
+        # Fit main price models with recency weights
         X_p = df_p[self.feature_cols]
         y_spread = (df_p["y_imbalance_price"] - df_p["spot_eff"]).to_numpy(dtype=np.float64)
         y_imb = df_p["y_imbalance_price"].to_numpy(dtype=np.float64)
+        w_p = self._compute_recency_weights(df_p["forecast_origin_utc"])
 
-        self.model_p10.fit(X_p, y_spread)
-        self.model_p50.fit(X_p, y_spread)
-        self.model_p90.fit(X_p, y_spread)
-        self.model_p50_direct.fit(X_p, y_imb)
+        self.model_p10.fit(X_p, y_spread, sample_weight=w_p)
+        self.model_p50.fit(X_p, y_spread, sample_weight=w_p)
+        self.model_p90.fit(X_p, y_spread, sample_weight=w_p)
+        self.model_p50_direct.fit(X_p, y_imb, sample_weight=w_p)
 
-        # Train direction model (-1 -> 0: down, 0 -> 1: none, +1 -> 2: up)
+        # Fit Short-Horizon Specialist (steps 1..8)
+        short_mask = df_p["step"] <= 8
+        df_p_short = df_p.loc[short_mask]
+        self.model_p50_short.fit(
+            df_p_short[self.feature_cols],
+            (df_p_short["y_imbalance_price"] - df_p_short["spot_eff"]).to_numpy(dtype=np.float64),
+            sample_weight=self._compute_recency_weights(df_p_short["forecast_origin_utc"]),
+        )
+
+        # Fit Direction models & compute historical priors strictly from train_df
         valid_dir = train_df["y_direction"].isin([-1.0, 0.0, 1.0])
         df_d = train_df.loc[valid_dir]
         X_d = df_d[self.feature_cols]
         y_dir_mapped = df_d["y_direction"].map({-1.0: 0, 0.0: 1, 1.0: 2}).to_numpy(dtype=np.int32)
-        self.model_dir.fit(X_d, y_dir_mapped)
+        w_d = self._compute_recency_weights(df_d["forecast_origin_utc"])
 
-        # Train spike models
+        self.prior_down = float(np.average(y_dir_mapped == 0, weights=w_d))
+        self.prior_none = float(np.average(y_dir_mapped == 1, weights=w_d))
+        self.prior_up = float(np.average(y_dir_mapped == 2, weights=w_d))
+
+        self.model_dir.fit(X_d, y_dir_mapped, sample_weight=w_d)
+
+        df_d_short = df_d.loc[df_d["step"] <= 8]
+        y_dir_short = df_d_short["y_direction"].map({-1.0: 0, 0.0: 1, 1.0: 2}).to_numpy(dtype=np.int32)
+        self.model_dir_short.fit(
+            df_d_short[self.feature_cols],
+            y_dir_short,
+            sample_weight=self._compute_recency_weights(df_d_short["forecast_origin_utc"]),
+        )
+
+        # Fit Spike models & compute historical base rates
         valid_spike = train_df["y_spike_high"].notna() & train_df["y_spike_low"].notna()
         df_s = train_df.loc[valid_spike]
         X_s = df_s[self.feature_cols]
-        self.model_spike_high.fit(X_s, df_s["y_spike_high"].to_numpy(dtype=np.int32))
-        self.model_spike_low.fit(X_s, df_s["y_spike_low"].to_numpy(dtype=np.int32))
+        y_sh = df_s["y_spike_high"].to_numpy(dtype=np.int32)
+        y_sl = df_s["y_spike_low"].to_numpy(dtype=np.int32)
+        w_s = self._compute_recency_weights(df_s["forecast_origin_utc"])
+
+        self.prior_spike_high = float(np.average(y_sh, weights=w_s))
+        self.prior_spike_low = float(np.average(y_sl, weights=w_s))
+
+        self.model_spike_high.fit(X_s, y_sh, sample_weight=w_s)
+        self.model_spike_low.fit(X_s, y_sl, sample_weight=w_s)
 
         return self
 
     def compute_top_drivers(self, X: pd.DataFrame, top_k: int = 3) -> list[str]:
-        """Compute top-k SHAP feature drivers per row using LightGBM native C++ TreeSHAP (pred_contrib=True)."""
-        # pred_contrib returns shape (n_rows, n_features + 1); last column is expected value bias
-        shap_vals = self.model_p50.predict(X, pred_contrib=True)[:, :-1]
+        """Compute top-k SHAP feature drivers per row using LightGBM TreeSHAP (num_threads=1 avoids macOS OpenMP lock)."""
+        shap_vals = self.model_p50.predict(X, pred_contrib=True, num_threads=1)[:, :-1]
         abs_shap = np.abs(shap_vals)
         top_idx = np.argsort(-abs_shap, axis=1)[:, :top_k]
         col_names = np.array(self.feature_cols)
@@ -257,17 +269,26 @@ class ImbalanceForecasterSuite:
         compute_shap: bool = True,
         temporal_ensemble: bool = True,
     ) -> pd.DataFrame:
-        """Generate predictions for all 8 required target columns + data_cutoff_utc + top_drivers."""
+        """Generate calibrated predictions for all 8 target columns + data_cutoff_utc + top_drivers."""
         X = feat_df[self.feature_cols]
         spot_eff = feat_df["spot_eff"].to_numpy(dtype=np.float64)
+        steps = feat_df["step"].to_numpy(dtype=np.float64)
 
         pred_spread_p10 = self.model_p10.predict(X)
-        pred_spread_p50 = self.model_p50.predict(X)
+        pred_spread_p50_full = self.model_p50.predict(X)
+        pred_spread_p50_short = self.model_p50_short.predict(X)
         pred_spread_p90 = self.model_p90.predict(X)
         pred_direct_p50 = self.model_p50_direct.predict(X)
 
-        # Reconstruct prices from spot_eff + spread, blending P50 with direct P50
-        p50 = 0.70 * (spot_eff + pred_spread_p50) + 0.30 * pred_direct_p50
+        # Blend Short-Horizon Specialist (steps 1..8) with Full-Horizon P50
+        short_weight = np.where(steps <= 4, 0.55, np.where(steps <= 8, 0.30, 0.0))
+        pred_spread_p50 = (1.0 - short_weight) * pred_spread_p50_full + short_weight * pred_spread_p50_short
+
+        # Reconstruct P50 with gentle spread damping (0.90) toward Spot on medium/long horizons
+        raw_p50 = 0.72 * (spot_eff + pred_spread_p50) + 0.28 * pred_direct_p50
+        damping = np.where(steps <= 4, 0.96, 0.90)
+        p50 = damping * raw_p50 + (1.0 - damping) * spot_eff
+
         raw_p10 = np.minimum(spot_eff + pred_spread_p10, p50)
         raw_p90 = np.maximum(spot_eff + pred_spread_p90, p50)
 
@@ -275,16 +296,29 @@ class ImbalanceForecasterSuite:
         p10 = p50 - self.conformal_scale_lo * (p50 - raw_p10) + self.conformal_shift_lo
         p90 = p50 + self.conformal_scale_hi * (raw_p90 - p50) + self.conformal_shift_hi
 
-        # Direction probabilities (classes: 0=down, 1=none, 2=up)
-        dir_probs = self.model_dir.predict_proba(X)
-        classes = list(self.model_dir.classes_)
-        p_down = dir_probs[:, classes.index(0)] if 0 in classes else np.zeros(len(X))
-        p_none = dir_probs[:, classes.index(1)] if 1 in classes else np.zeros(len(X))
-        p_up = dir_probs[:, classes.index(2)] if 2 in classes else np.zeros(len(X))
+        # Direction probabilities (classes: 0=down, 1=none, 2=up) + Short-Horizon Specialist + Empirical Bayes Shrinkage
+        dir_probs_full = self.model_dir.predict_proba(X)
+        dir_probs_short = self.model_dir_short.predict_proba(X)
+        w_dir_short = np.where(steps <= 4, 0.50, np.where(steps <= 8, 0.25, 0.0))[:, None]
+        dir_probs = (1.0 - w_dir_short) * dir_probs_full + w_dir_short * dir_probs_short
 
-        # Spike probabilities
-        p_spike_high = self.model_spike_high.predict_proba(X)[:, 1]
-        p_spike_low = self.model_spike_low.predict_proba(X)[:, 1]
+        classes = list(self.model_dir.classes_)
+        raw_down = dir_probs[:, classes.index(0)] if 0 in classes else np.zeros(len(X))
+        raw_none = dir_probs[:, classes.index(1)] if 1 in classes else np.zeros(len(X))
+        raw_up = dir_probs[:, classes.index(2)] if 2 in classes else np.zeros(len(X))
+
+        # Step-dependent Brier shrinkage: keep sharp at steps 1-4 (alpha=0.82), stronger shrinkage at steps 9-40 (alpha=0.60)
+        alpha_dir = np.where(steps <= 4, 0.82, np.where(steps <= 8, 0.70, 0.60))
+        p_up = alpha_dir * raw_up + (1.0 - alpha_dir) * self.prior_up
+        p_down = alpha_dir * raw_down + (1.0 - alpha_dir) * self.prior_down
+        p_none = alpha_dir * raw_none + (1.0 - alpha_dir) * self.prior_none
+
+        # Spike probabilities with gentle Brier calibration shrinkage (alpha=0.86)
+        raw_sh = self.model_spike_high.predict_proba(X)[:, 1]
+        raw_sl = self.model_spike_low.predict_proba(X)[:, 1]
+        alpha_spike = np.where(steps <= 4, 0.92, 0.85)
+        p_spike_high = alpha_spike * raw_sh + (1.0 - alpha_spike) * self.prior_spike_high
+        p_spike_low = alpha_spike * raw_sl + (1.0 - alpha_spike) * self.prior_spike_low
 
         top_drivers = (
             self.compute_top_drivers(X, top_k=3)

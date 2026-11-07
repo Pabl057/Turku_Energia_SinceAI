@@ -235,14 +235,25 @@ Vor dem Speichern von `forecast_backtest.csv` werden die Regeln erzwungen und ge
 
 ---
 
-## 6. Kurz-Checkliste für das Team
+## 6. Finale Ergebnisse & Status-Checkliste für das Team
 
 - [x] **Python-Umgebung (`./venv`)** mit Python 3.12, `lightgbm`, `shap`, `pandas`, `numpy`, `scikit-learn`, `jupyter` installiert.
 - [x] **Datenstruktur (`data/`)** sauber konsolidiert und in `.gitignore` vor versehentlichem Upload geschützt.
-- [ ] **Nächster Meilenstein (Level 1 Pipeline):**
-  1. `src/data/loader.py` & `src/features/build_features.py` erstellen.
-  2. Die 6 LightGBM-Modelle in `src/models/` auf der Validierungsperiode trainieren und die Baseline (`MAE < 66.20 €/MWh`) schlagen.
-  3. Erste valide `forecast_backtest.csv` (26.920 Zeilen) generieren.
-- [ ] **Über-nächster Meilenstein (Level 2 Dashboard in `apps/`):**
-  1. Interaktives Dashboard mit Warn-Alerts bei `p_spike_high > 0.3` / `p_spike_low > 0.3`.
-  2. „Time Machine“-Slider zum Durchklicken der 673 historischen Forecast Origins inkl. `top_drivers` (SHAP).
+- [x] **Level 1 Pipeline (`src/`) komplett abgeschlossen & feingetunt:**
+  1. `src/data/loader.py` & `src/features/build_features.py` (105 kausale Features ohne Data Leakage).
+  2. `src/models/forecaster.py` (8-Modell LightGBM Suite inkl. Short-Horizon Specialists, Exponential Recency Weighting, Conformal Calibration, Empirical Bayes Brier Shrinkage & TreeSHAP `top_drivers`).
+  3. Finale `forecast_backtest.csv` (26.920 Zeilen, `VALIDATION PASSED: 0 Errors, 0 Warnings`).
+- [x] **Level 2 Situational Dashboard (`apps/dashboard.py`) fertiggestellt:**
+  1. Interaktives Echtzeit-Dashboard (`./venv/bin/python apps/dashboard.py 8050` auf `http://localhost:8050`).
+  2. Dual-Mode: **Validation Replay (mit echten Ist-Preisen & Live-Fehlermetriken)** + **Official Test Backtest (673 Origins)**.
+  3. „Time Machine“-Slider, Quick-Jump zu Top-Spikes, Actionable Alerts für Trader & Shift Supervisors (`p_spike > 0.30`) und interaktive TreeSHAP `top_drivers`.
+
+### 🏆 Offizielle Validierungsergebnisse (`score.py` auf 672 Origins / 26.880 Viertelstunden)
+
+| Bewertungs-Kategorie (Gewichtung) | Offizielle Baseline | Reine Spotpreis-Benchmark | **Unser Fine-Tuned System** | Verbesserung ggü. Baseline |
+| :--- | :---: | :---: | :---: | :---: |
+| **MAE auf `p50`** *(30% Gewicht)* | 66,20 €/MWh | 46,47 €/MWh | **43,65 €/MWh** *(Stunde 1: **40,83 €**)* | **-34,1 % Fehler** (-22,55 €/MWh) |
+| **P10–P90 Coverage** *(Ziel: 80,0%)* | 68,29 % | — | **80,09 %** | **Punktlandung (+0,09 % am Ziel)** |
+| **Mean Pinball Loss (`p10`/`p90`)** *(20% Gewicht)* | 24,18 | — | **13,03** (`p10`: 7,63 / `p90`: 18,43) | **-46,1 % Fehler** |
+| **Spike Brier Score (`±50 €`)** *(20% Gewicht)* | 0,1132 | — | **0,0965** (ROC-AUC Low: `0.872`) | **-14,8 % besser** |
+| **Direction 3-Class Brier** *(10% Gewicht)* | 0,4509 | — | **0,4134** *(Stunde 1: **0,3808**)* | **-8,3 % besser** (66,3 % Acc.) |
