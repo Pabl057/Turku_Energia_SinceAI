@@ -3,7 +3,7 @@
   "checkpoint_id": "01M6TSDYC1MVTHBYDWV3AR75N1",
   "strategy": "manual-commit",
   "branch": "feat/lgbm-pipeline",
-  "checkpoints_count": 8,
+  "checkpoints_count": 9,
   "files_touched": [
     "PROJECT_GUIDE.md",
     "apps/dashboard.py",
@@ -28,6 +28,12 @@
       "transcript": "/2/full.jsonl",
       "content_hash": "/2/content_hash.txt",
       "prompt": "/2/prompt.txt"
+    },
+    {
+      "metadata": "/3/metadata.json",
+      "transcript": "/3/full.jsonl",
+      "content_hash": "/3/content_hash.txt",
+      "prompt": "/3/prompt.txt"
     }
   ],
   "token_usage": {
