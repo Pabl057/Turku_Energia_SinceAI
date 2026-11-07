@@ -10,7 +10,7 @@ Hier liegt oft das größte Missverständnis. Deshalb klären wir zuerst die **z
 
 > [!IMPORTANT]
 > **Wir müssen NICHT den Spotpreis vorhersagen!**
-> Den **Day-Ahead Spotpreis** bekommen wir von der Strombörse Nord Pool **bereits am Vortag um 14:00 Uhr fertig geliefert** (`data/spot_nordpool.csv`).
+> Den **Day-Ahead Spotpreis** bekommen wir von der Strombörse Nord Pool **bereits am Vortag um 14:00 Uhr fertig geliefert** (`../data/spot_nordpool.csv`).
 > Was wir vorhersagen müssen, ist der **Ausgleichsenergiepreis (`Imbalance Price`)** – also wie stark der echte Netzpreis in den nächsten 10 Stunden vom bereits bekannten Spotpreis nach oben oder unten abweichen wird!
 
 ### 🕒 Der exakte 24-Stunden-Zeitstrahl (vom Vortag bis zu unserer Prediction)
@@ -122,7 +122,7 @@ Da `aFRR` und `mFRR` erst in Echtzeit aktiviert werden, kennen wir zum Zeitpunkt
 
 ## 2. Übersicht aller Datenquellen & wann wir sie nutzen dürfen (`availability.csv`)
 
-Diese Tabelle zeigt exakt, welche Daten im Ordner `data/` liegen und wann sie für eine Prognose zum Zeitpunkt $t$ (`forecast_origin_utc`) sichtbar sind:
+Diese Tabelle zeigt exakt, welche Daten im Ordner `../data` liegen und wann sie für eine Prognose zum Zeitpunkt $t$ (`forecast_origin_utc`) sichtbar sind:
 
 | Datenquelle (`series_group`) | Fingrid / ENTSO-E ID | Wann verfügbar? (`first_usable_origin_utc`) | Rolle für unsere Prediction zum Zeitpunkt $t$ |
 | :--- | :--- | :--- | :--- |
@@ -193,10 +193,10 @@ Unsere Projektstruktur ist bereits fertig vorbereitet:
 └── validate_submission.py     # Offizielles Validierungs-Skript
 ```
 
-### Schritt 1: Daten-Loader (`src/data/loader.py`)
-Lädt `data/inputs.parquet` und `data/spot_nordpool.csv` und stellt `rows_available_at(data, origin_utc)` bereit, sodass niemals Zukunftsdaten durchsickern.
+### Schritt 1: Daten-Loader (`../src/data/loader.py`)
+Lädt `../data/inputs.parquet` und `data/spot_nordpool.csv` und stellt `rows_available_at(data, origin_utc)` bereit, sodass niemals Zukunftsdaten durchsickern.
 
-### Schritt 2: Feature-Builder (`src/features/build_features.py`)
+### Schritt 2: Feature-Builder (`../src/features/build_features.py`)
 Erzeugt für jeden Prognosezeitpunkt $t$ (`forecast_origin_utc`) und jeden der 40 Schritte (`step = 1..40`, also `delivery_start_utc = t + (step-1)*15min`) eine Zeile in der Feature-Matrix $X$:
 1. **Horizont-Feature:** `step` (1 bis 40).
 2. **Zukunfts-Features am Zeitpunkt `delivery_start_utc`** *(sofern `first_usable_origin_utc <= t`)*:
@@ -212,18 +212,18 @@ Erzeugt für jeden Prognosezeitpunkt $t$ (`forecast_origin_utc`) und jeden der 4
    * `consumption_forecast_error`: Letzter echter Verbrauch (`124`, 30 Min vor $t$) minus prognostizierter Verbrauch (`165`) – zeigt sofort, ob die Verbrauchsprognose heute danebenliegt!
    * `net_cross_border_flow`: Summe der aktuellen Grenzflüsse (`61`, `57`, `60`, `55`).
 
-### Schritt 3: Training der 6 LightGBM-Modelle (`src/models/train.py`)
+### Schritt 3: Training der 6 LightGBM-Modelle (`../src/models/train.py`)
 Wir trainieren die 6 Modelle mit `RANDOM_SEED = 42`:
 * **Auf der Validierungsperiode testen:**
   * Training auf Daten vor dem **7. September 2026** (`2026-09-06T21:00:00Z`).
   * Vorhersage für die Validierungsperiode (**7. Sep – 4. Okt 2026**).
-  * Bewertung mit `score.py` gegen `data/actuals_validation.csv` (Vergleich mit Baseline: `MAE 66.20`, `Pinball 24.18`).
-* **Für die finale Abgabe (`forecast_backtest.csv`):**
+  * Bewertung mit `../score.py` gegen `data/actuals_validation.csv` (Vergleich mit Baseline: `MAE 66.20`, `Pinball 24.18`).
+* **Für die finale Abgabe (`../forecast_backtest.csv`):**
   * Training auf allen Daten bis zum **4. Oktober 2026** (bzw. rollierendes Nachtrainieren).
   * Vorhersage für die **673 Test-Origins** (`5. Okt – 1. Nov 2026`, ergibt exakt **26.920 Zeilen**).
 
 ### Schritt 4: Postprocessing & Pflicht-Validierung
-Vor dem Speichern von `forecast_backtest.csv` werden die Regeln erzwungen und geprüft:
+Vor dem Speichern von `../forecast_backtest.csv` werden die Regeln erzwungen und geprüft:
 
 ```bash
 # 1. Format-Validierung (muss VALIDATION PASSED ergeben!)
@@ -237,12 +237,12 @@ Vor dem Speichern von `forecast_backtest.csv` werden die Regeln erzwungen und ge
 
 ## 6. Kurz-Checkliste für das Team
 
-- [x] **Python-Umgebung (`./venv`)** mit Python 3.12, `lightgbm`, `shap`, `pandas`, `numpy`, `scikit-learn`, `jupyter`, `streamlit`, `plotly` installiert.
-- [x] **Datenstruktur (`data/`)** sauber konsolidiert und in `.gitignore` vor versehentlichem Upload geschützt.
+- [x] **Python-Umgebung (`../venv`)** mit Python 3.12, `lightgbm`, `shap`, `pandas`, `numpy`, `scikit-learn`, `jupyter`, `streamlit`, `plotly` installiert.
+- [x] **Datenstruktur (`../data`)** sauber konsolidiert und in `../.gitignore` vor versehentlichem Upload geschützt.
 - [x] **Meilenstein 1 (Level 1 Pipeline):**
-  1. `src/data/loader.py` & `src/features/build_features.py` erstellt (181 Anti-Leakage Features).
-  2. Die LightGBM-Modell-Suite (inkl. Short-Horizon Specialists, Split Conformal Quantile Calibration & Empirical Bayes Brier-Kalibrierung) in `src/models/train.py` auf der Validierungsperiode trainiert (`MAE: 43.35 €/MWh` vs. Baseline `66.20 €/MWh`; `Pinball: 12.43` vs. Baseline `24.18`; `Spike Brier: 0.0943` vs. `0.1132`; `Direction Brier: 0.4132` vs. `0.4509`; `Coverage: 80.00%`).
-  3. Valide `forecast_backtest.csv` (26.920 Zeilen, `VALIDATION PASSED`) generiert.
-- [x] **Meilenstein 2 (Level 2 Dashboard in `apps/dashboard.py`):**
+  1. `../src/data/loader.py` & `src/features/build_features.py` erstellt (181 Anti-Leakage Features).
+  2. Die LightGBM-Modell-Suite (inkl. Short-Horizon Specialists, Split Conformal Quantile Calibration & Empirical Bayes Brier-Kalibrierung) in `../src/models/train.py` auf der Validierungsperiode trainiert (`MAE: 43.35 €/MWh` vs. Baseline `66.20 €/MWh`; `Pinball: 12.43` vs. Baseline `24.18`; `Spike Brier: 0.0943` vs. `0.1132`; `Direction Brier: 0.4132` vs. `0.4509`; `Coverage: 80.00%`).
+  3. Valide `../forecast_backtest.csv` (26.920 Zeilen, `VALIDATION PASSED`) generiert.
+- [x] **Meilenstein 2 (Level 2 Dashboard in `../apps/dashboard.py`):**
   1. Interaktives Dashboard mit Warn-Alerts bei `p_spike_high >= 0.3` / `p_spike_low >= 0.3` und Revisions-Tracking.
   2. „Time Machine“-Auswahl zum Durchklicken aller 673 Test- und 672 Validierungs-Origins inkl. `top_drivers` (TreeSHAP) und JSON-API-Export.

@@ -39,6 +39,8 @@ New to electricity markets? See section 12 (Glossary) for the key terms.
 | `build_dataset.py` | organiser script that built the data files (optional for you, section 8) |
 | `make_templates.py` | organiser script that built the templates; also builds templates for other periods |
 | `requirements.txt` | Python dependencies |
+| `INSTRUCTIONS.md` | command reference for environment setup, training, dashboard, and tests |
+| `docs/` | project documentation (`CHALLENGE_BRIEF.md`, `EVALUATION_REPORT.md`, `DATA_MODELS_LICENSES.md`, `PROJECT_GUIDE.md`, `notes.md`) |
 
 `baseline.ipynb` creates the folder `baseline_output/` when you run it. The folder is not part of the
 distributed package.
@@ -556,8 +558,8 @@ Sources and licences
 
 - Submit through the **Since AI platform**.
 - Submit one forecast file, `forecast_backtest.csv`. No example forecast is submitted.
-- Submit the other deliverables listed in section 07 of the challenge description: source code and
-  start-up instructions, evaluation report, list of data sources and components with their licences,
+- Submit the other deliverables listed in section 07 of the challenge description (`docs/CHALLENGE_BRIEF.md`): source code and
+  start-up instructions (`INSTRUCTIONS.md`), evaluation report (`docs/EVALUATION_REPORT.md`), list of data sources and components with their licences (`docs/DATA_MODELS_LICENSES.md`),
   presentation slides and demo video.
 - Run the validator before submitting.
 - The deadline and file size limits are given in the Since AI event instructions.

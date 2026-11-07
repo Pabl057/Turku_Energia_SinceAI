@@ -88,6 +88,12 @@ Maintain clean, modular code to facilitate collaboration across the 4 team membe
 │   ├── forecast_origins.csv   # 673 test forecast origins
 │   ├── sample_submission.csv  # Sample submission format (26,920 rows)
 │   └── quality_report.*   # Data quality reports
+├── docs/                  # Project documentation & hackathon deliverables
+│   ├── CHALLENGE_BRIEF.md     # Official hackathon challenge brief
+│   ├── DATA_MODELS_LICENSES.md # Data sources, models, components & licenses
+│   ├── EVALUATION_REPORT.md   # Level 1 & Level 2 methodology & benchmark report
+│   ├── PROJECT_GUIDE.md       # Architecture & timeline guide
+│   └── notes.md               # Research & exploratory notes
 ├── src/
 │   ├── data/              # Data loading & availability filtering (rows_available_at)
 │   ├── features/          # Feature engineering (Fingrid forecasts, calendar, grid flows)
@@ -95,13 +101,17 @@ Maintain clean, modular code to facilitate collaboration across the 4 team membe
 │   └── evaluation/        # Validation pipeline wrapping score.py & validate_submission.py
 ├── notebooks/
 │   └── baseline.ipynb     # Official starter baseline notebook & exploratory analysis
-├── apps/                  # Level 2 Dashboard (Streamlit / FastHTML / React UI + API)
+├── apps/                  # Level 2 Dashboard (Streamlit UI + Situational Desk)
+├── scripts/
+│   └── run_checks.sh      # Automated test suite & validator runner
+├── tests/                 # Automated pytest suite (anti-leakage, schema, metrics, privacy)
 ├── venv/                  # Local Python 3.12 virtual environment (GIT-IGNORED)
 ├── build_dataset.py       # Official dataset builder (READ-ONLY)
 ├── make_templates.py      # Official template generator (READ-ONLY)
 ├── score.py               # Official local evaluation script (READ-ONLY)
 ├── validate_submission.py # Official submission validator (READ-ONLY)
 ├── requirements.txt       # Python dependencies (pandas, numpy, lightgbm, shap, jupyter, etc.)
+├── INSTRUCTIONS.md        # Command reference for training, dashboard, and testing
 ├── AGENTS.md              # This instruction set
 └── forecast_backtest.csv  # Final generated output
 ```
