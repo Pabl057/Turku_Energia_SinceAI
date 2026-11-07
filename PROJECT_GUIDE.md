@@ -257,3 +257,83 @@ Vor dem Speichern von `forecast_backtest.csv` werden die Regeln erzwungen und ge
 | **Mean Pinball Loss (`p10`/`p90`)** *(20% Gewicht)* | 24,18 | — | **13,03** (`p10`: 7,63 / `p90`: 18,43) | **-46,1 % Fehler** |
 | **Spike Brier Score (`±50 €`)** *(20% Gewicht)* | 0,1132 | — | **0,0965** (ROC-AUC Low: `0.872`) | **-14,8 % besser** |
 | **Direction 3-Class Brier** *(10% Gewicht)* | 0,4509 | — | **0,4134** *(Stunde 1: **0,3808**)* | **-8,3 % besser** (66,3 % Acc.) |
+
+---
+
+## 7. Ehrliche & Kritische Bestandsaufnahme: Was ist gut, was ist schlecht?
+
+Um als Team genau zu wissen, wo wir im Wettbewerb stehen (und auf welche kritischen Fragen der Jury wir vorbereitet sein müssen), ist hier die ungeschönte Analyse unseres aktuellen Systems:
+
+### ✅ Was wirklich stark ist (Unsere Wettbewerbsvorteile)
+
+1. **Perfekte Unsicherheits-Kalibrierung (`80,09 %` Coverage & `-46,1 %` Pinball Loss – 20 % der Gesamtnote):**
+   * Unkalibrierte GBDT-Quantilmodelle sind Out-of-Sample fast immer zu eng (`65–72 %` Coverage, Baseline lag bei `68,29 %`).
+   * Durch unsere **Split Conformal Quantile Calibration** treffen wir das offizielle `80,0 %`-Ziel der Challenge auf **`0,09 %` genau (`80,09 %`)** und senken den Pinball Loss von `24,18` auf **`13,03`**. In dieser Bewertungskategorie holen wir nahezu das theoretische Maximum.
+2. **Starke Kurzfrist-Prognose in Stunde 1–2 (`MAE 40,83 €/MWh`, `Direction Brier 0,3808`):**
+   * Während der reine Nord Pool Spotpreis einen MAE von `46,47 €/MWh` hat, schlägt unser Modell den Spotpreis in der ersten Stunde um **`5,64 €/MWh` (-12,1 % unter Spot)** und über den gesamten 10h-Horizont um **`2,82 €/MWh` (-6,1 % unter Spot)**.
+   * Möglich wird das durch die Kombination aus **30-Minuten-Verbrauchsprognosefehler (`Fingrid 124 vs. 165`)**, **60-Minuten aFRR/mFRR-Echtzeit-Lags** und unseren **Short-Horizon Specialist-Modellen** für die Schritte `1..8`.
+3. **Exzellente Erkennung negativer Preisspitzen (`spike_low` ROC-AUC `0.872`):**
+   * Überangebot-Situationen (Starkwind + niedrige Last $\rightarrow$ Preise stürzen um $>50\text{ €/MWh}$ unter Spot) erkennt unser Modell mit hoher Zuverlässigkeit (`Brier 0.0921`).
+4. **100 % Regelkonformität + Komplettes End-to-End-Produkt (Level 1 + Level 2 + SHAP):**
+   * **Kein Data Leakage:** Streng nach `first_usable_origin_utc <= t` gefiltert (`validate_submission.py` $\rightarrow$ `0 Errors, 0 Warnings`).
+   * **Echte Erklärbarkeit:** Exakte `TreeSHAP`-Werte (`top_drivers`) in allen 26.920 Vorhersage-Zeilen.
+   * **Einsatzbereites Level-2-Dashboard (`apps/dashboard.py`):** Mit Time-Machine, Spike-Quick-Jumps, Trader-Ampel-Alerts (`p_spike > 0.30`) und direktem Soll-/Ist-Vergleich auf der Validierungsperiode.
+
+---
+
+### ⚠️ Was noch schwach / kritisch ist (Ehrliche Schwachstellen & Grenzen)
+
+1. **`P50`-Punktprognose ist bei extremen Preis-Spikes zu konservativ („Median-Trägheit“):**
+   * **Das Problem:** Wenn der echte Ausgleichspreis bei einem Netz-Notfall auf `+500` oder `+700 €/MWh` explodiert (z. B. am `11.09.2026`), schlagen zwar unsere **`p_spike_high`-Wahrscheinlichkeit (`> 30–50 %`)** und das **`P90`-Band (`~250–350 €`)** deutlich an – aber unsere **`P50`-Kurve (Median)** geht oft nur um `+20` bis `+45 €/MWh` über den Spotpreis.
+   * **Warum passiert das?** In **64 % aller Viertelstunden** herrscht keine dominante Regelrichtung (`direction = none`), sodass `Ausgleichspreis == Spotpreis` (`Spread = 0`) gilt. Ein `L1`/Median-Modell wird mathematisch hart bestraft, wenn es im `P50` mutig `+300 €` vorhersagt und der Spike eine Viertelstunde früher oder später eintritt.
+2. **Nachlassende Prognosekraft ab Stunde 4 bis 10 (`Steps 13..40`):**
+   * Ab Stunde 4 (`MAE ~44,20 €/MWh`) sind die aktuellen `aFRR`/`mFRR`-Störungen weitgehend abgeklungen. Da im offiziellen Datensatz **keine Intraday-Wetter-Updates** enthalten sind (nur die Fingrid Day-Ahead-Prognose vom Vortag 13:00 Uhr), kann das Modell plötzliche Wetterumschwünge in Stunde 5–10 nicht voraussehen und fällt stark auf den bekannten Spotpreis zurück.
+3. **Positive Spikes (`spike_high` ROC-AUC `0.734`) sind schwerer vorherzusagen als negative (`0.872`):**
+   * Während Wind-Überschüsse (`spike_low`) schon am Vortag gut im Wetterbericht sichtbar sind, entstehen Mangel-Spikes (`spike_high`) häufig durch kurzfristige Kraftwerks- oder Interkonnektor-Ausfälle sowie plötzliche Windflauten, die in den Day-Ahead-Features ab Stunde 3 kaum angekündigt werden.
+4. **Statisches Training vor dem Test-Monat (Kein Rolling Retraining im Oktober):**
+   * Aktuell wird das finale Test-Modell **einmalig** mit Daten bis zum `4. Oktober 2026` trainiert und sagt dann alle 673 Origins bis zum `1. November 2026` vorher. Es nutzt zwar zu jedem Zeitpunkt $t$ die frischen Echtzeit-Lags, passt aber seine Baumgewichte während des Oktobers nicht an das kältere Herbst-/Heizregime an.
+5. **Monokultur bei der Modell-Architektur (Reines LightGBM):**
+   * Alle 8 Teilmodelle basieren aktuell auf LightGBM. Es fehlt noch ein zweites, strukturell anderes Modell (z. B. `CatBoost` oder ein regularisiertes `Ridge`/`Huber`-Linearmodell) zur Varianzreduktion im Ensemble.
+
+---
+
+## 8. Roadmap: Wie wir jetzt konkret weiter vorgehen müssen
+
+Wir teilen das weitere Vorgehen in **technische Modell-Upgrades (falls wir noch Zeit für weitere Score-Verbesserungen haben)** und **Pflicht-Schritte für Abgabe & Jury-Pitch** auf:
+
+```mermaid
+flowchart LR
+    A["Phase 1: Abgabe-Sicherheit (Erledigt)"] --> B["Phase 2: High-Impact Modell-Upgrades (Optional, 1-2h)"]
+    B --> C["Phase 3: Storyline, Jury-Report & Live-Demo (20% + 20% Note!)"]
+```
+
+### 🛠️ Phase 1: Technische High-Impact Upgrades (Was noch echte Punkte bringt)
+
+Falls wir am Code noch weiter feilen wollen, sind das die **3 Maßnahmen mit dem höchsten Return-on-Investment**:
+
+1. **Wöchentliches Rolling Retraining im Test-Backtest (`src/evaluation/pipeline.py`):**
+   * **Idee:** Statt das Modell am `04.10.2026` einzufrieren, teilen wir die 673 Test-Origins in **4 Wochen-Blöcke** (Woche 1: `05.–11.10.`, Woche 2: `12.–18.10.`, Woche 3: `19.–25.10.`, Woche 4: `26.10.–01.11.`) und trainieren vor jeder Woche mit allen bis dahin verfügbaren Daten (`first_usable_origin_utc <= week_start`) neu.
+   * **Erwarteter Gewinn:** ca. **`0,5 bis 1,2 €/MWh` besserer MAE** in den letzten zwei Oktoberwochen, weil das Modell die steigende Herbst-Heizlast lernt.
+2. **Regime-Switching / Spike-Boost für `P50` in Stunde 1–2 (`src/models/forecaster.py`):**
+   * **Idee:** Wenn in `Steps 1..6` sowohl `p_spike_high > 0.45` als auch `p_up > 0.55` aktiv sind, mischen wir einen kleinen Anteil (`z. B. 10–15 %`) des oberen Quantils (`P90`) in die `P50`-Prognose ein. Dadurch reagiert die `P50`-Kurve bei akuten Netz-Notfällen mutiger, ohne in den 64 % ruhigen Stunden zu verrauschen.
+3. **CatBoost / Huber-Regressor Blend:**
+   * **Idee:** Einen zusätzlichen `CatBoostRegressor(loss_function='MAE')` auf denselben 105 Features trainieren und `50/50` mit LightGBM mitteln. Reduziert Ausreißer-Bäume auf ungesehenen Testwochen.
+
+---
+
+### 🎤 Phase 2: Vorbereitung für Jury-Report & Demo (Zählt zusammen 40 % der Gesamtbewertung!)
+
+Vergesst nicht die offizielle Punkteverteilung aus `AGENTS.md`:
+* **20 % Reasoning Chain & Documentation** (Level 1 Begründung & Methodik)
+* **20 % Situational Dashboard & Decision Support** (Level 2 UI)
+
+**Unsere konkrete Checkliste für die Präsentation:**
+
+1. **Die „Ehrliche Story“ im Pitch offensiv nutzen (Jury liebt Transparenz):**
+   * Erklärt der Jury aktiv: *„Warum ist der Ausgleichspreis ab Stunde 4 so schwer vorherzusagen? Weil in Stunde 1–2 die Echtzeit-Trägheit aus `aFRR`/`mFRR` dominiert (wo unser Spezialisten-Modell den Spotpreis um fast 6 €/MWh schlägt!), während ab Stunde 4 die Vortags-Wetterprognosen dominieren. Deshalb haben wir unser System als **Horizont-Decay-Brücke** gebaut und ab Stunde 4 den Fokus auf **perfekt kalibrierte 80%-Risikobänder (`80,09 %` Coverage)** gelegt!“*
+   * Damit verwandelt ihr eine physikalische Grenze des Datensatzes in den stärksten Beweis eurer Domänen-Kompetenz!
+2. **Live-Demo im Dashboard (`http://localhost:8050`) vorführen:**
+   * **Schritt 1:** Im Dashboard oben links auf **`Validation Period (with Actuals)`** schalten.
+   * **Schritt 2:** Rechts auf den Quick-Jump-Button **`11 Sep 10:00 (+700€)`** klicken.
+   * **Schritt 3:** Der Jury zeigen, wie die **Actionable Alert Box** für Schichtleiter & Trader sofort auf Rot (`HIGH UPWARD SPIKE RISK`) springt, die goldene Ist-Preiskurve im `P10–P90`-Trichter verläuft und unten rechts im **SHAP-Panel** exakt erklärt wird, *warum* das Modell gewarnt hat (Echtzeit-Spread + Residuallast).
+   * **Schritt 4:** Umschalten auf **`Official Test Backtest (Oct 2026)`** und zeigen, dass alle 673 Test-Origins (26.920 Zeilen) live durchklickbar und zu 100 % validiert sind.
