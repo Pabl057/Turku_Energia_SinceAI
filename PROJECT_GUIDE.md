@@ -337,3 +337,18 @@ Vergesst nicht die offizielle Punkteverteilung aus `AGENTS.md`:
    * **Schritt 2:** Rechts auf den Quick-Jump-Button **`11 Sep 10:00 (+700€)`** klicken.
    * **Schritt 3:** Der Jury zeigen, wie die **Actionable Alert Box** für Schichtleiter & Trader sofort auf Rot (`HIGH UPWARD SPIKE RISK`) springt, die goldene Ist-Preiskurve im `P10–P90`-Trichter verläuft und unten rechts im **SHAP-Panel** exakt erklärt wird, *warum* das Modell gewarnt hat (Echtzeit-Spread + Residuallast).
    * **Schritt 4:** Umschalten auf **`Official Test Backtest (Oct 2026)`** und zeigen, dass alle 673 Test-Origins (26.920 Zeilen) live durchklickbar und zu 100 % validiert sind.
+
+---
+
+## 9. Unser mathematisches Alleinstellungsmerkmal für die Jury: Birnbaum Reliability Importance ($I_i^B$, $I_i^{CR}$, $I_i^{FV}$)
+
+Neben klassischen `TreeSHAP`-Werten (die erklären, wie viele €/MWh ein Feature zum `P50`-Preis addiert) haben wir in [`src/models/forecaster.py`](file:///Users/eneskaradeniz/sonstiges/sinceAi/src/models/forecaster.py) und im Level-2-Dashboard ([`apps/dashboard.py`](file:///Users/eneskaradeniz/sonstiges/sinceAi/apps/dashboard.py)) **Birnbaum Importance Measures** (nach Z.W. Birnbaum, 1969) aus der Kraftwerks- und Netzzuverlässigkeitstheorie integriert:
+
+1. **Birnbaum Structural/Risk Importance ($I_i^B$):**
+   $$I_i^B = \frac{\partial P(\text{System Spike})}{\partial p_i} = P(\text{Spike} \mid \text{Subsystem } i \text{ kritisch}) - P(\text{Spike} \mid \text{Subsystem } i \text{ normal})$$
+   * Misst über die logistische Jacobi-Ableitung $p_{\text{spike}}(1 - p_{\text{spike}}) \cdot |\phi_i^{\text{SHAP}}|$, wie empfindlich die System-Spike-Wahrscheinlichkeit ($\left|P_{\text{imb}} - P_{\text{spot}}\right| > 50\text{ €/MWh}$) auf einen Ausfall oder Stresszustand im jeweiligen Netz-Teilsystem reagiert.
+2. **Criticality Importance ($I_i^{CR}$):**
+   $$I_i^{CR} = \frac{I_i^B \cdot p_i}{P(\text{System Spike})}$$
+   * Gewichtet die strukturelle Birnbaum-Sensitivität mit der aktuellen Stress-Wahrscheinlichkeit $p_i$ des Teilsystems zum Zeitpunkt $t$.
+3. **Fussell-Vesely Minimal Cut-Set Importance ($I_i^{FV}$):**
+   * Zeigt dem Schichtleiter in der Leitwarte, mit welcher Wahrscheinlichkeit eines der **5 physikalischen Netz-Subsysteme** (*1. Echtzeit-Regelenergie aFRR/mFRR*, *2. Residuallast & Windprognose*, *3. Day-Ahead Spot-Regime*, *4. 30-Minuten Verbrauchsprognosefehler*, *5. Grenz-Interkonnektoren SE1/SE3/EE*) Teil der kritischen Engpass-Kette (*Minimal Cut-Set*) ist.

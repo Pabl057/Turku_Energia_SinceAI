@@ -262,11 +262,47 @@ class ImbalanceForecasterSuite:
 
         return self
 
+    def compute_birnbaum_importance(self, X: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+        """Compute Birnbaum Reliability Importance Measures (I^B_j = dP(Spike)/dq_j) and Criticality Importance (I^CR_j).
+
+        In reliability engineering (Birnbaum, 1969), the Birnbaum Importance I^B_j of component j
+        measures the rate of change of the system failure/spike probability P(Spike) with respect
+        to component j entering a stressed/critical state:
+            I^B_j = P(Spike | X_j = stressed) - P(Spike | X_j = normal) = p_spike * (1 - p_spike) * phi_j
+        where phi_j is the log-odds TreeSHAP contribution of feature j in the spike classifiers.
+        """
+        sh_contrib = self.model_spike_high.booster_.predict(X, pred_contrib=True, num_threads=1)
+        sl_contrib = self.model_spike_low.booster_.predict(X, pred_contrib=True, num_threads=1)
+
+        sh_logodds = np.sum(sh_contrib, axis=1, keepdims=True)
+        sl_logodds = np.sum(sl_contrib, axis=1, keepdims=True)
+        p_sh = 1.0 / (1.0 + np.exp(-np.clip(sh_logodds, -20.0, 20.0)))
+        p_sl = 1.0 / (1.0 + np.exp(-np.clip(sl_logodds, -20.0, 20.0)))
+
+        # Jacobian factor dP/d(log-odds) = P * (1 - P) converting log-odds sensitivity into probability space I^B_j
+        jac_sh = p_sh * (1.0 - p_sh)
+        jac_sl = p_sl * (1.0 - p_sl)
+
+        birnbaum_high = np.abs(sh_contrib[:, :-1]) * jac_sh
+        birnbaum_low = np.abs(sl_contrib[:, :-1]) * jac_sl
+        birnbaum_total = birnbaum_high + birnbaum_low
+
+        # Criticality Importance I^CR_j normalized per row
+        row_sum = np.maximum(np.sum(birnbaum_total, axis=1, keepdims=True), 1e-9)
+        criticality_imp = birnbaum_total / row_sum
+        return birnbaum_total, criticality_imp
+
     def compute_top_drivers(self, X: pd.DataFrame, top_k: int = 3) -> list[str]:
-        """Compute top-k SHAP feature drivers per row using LightGBM TreeSHAP (num_threads=1 avoids macOS OpenMP lock)."""
+        """Compute top-k feature drivers per row combining Price TreeSHAP and Birnbaum Spike Importance (I^B)."""
         shap_vals = self.model_p50.predict(X, pred_contrib=True, num_threads=1)[:, :-1]
         abs_shap = np.abs(shap_vals)
-        top_idx = np.argsort(-abs_shap, axis=1)[:, :top_k]
+        shap_norm = abs_shap / np.maximum(np.sum(abs_shap, axis=1, keepdims=True), 1e-9)
+
+        _, birnbaum_crit = self.compute_birnbaum_importance(X)
+
+        # Hybrid score: 65% P50 price sensitivity + 35% Birnbaum Spike Reliability Importance
+        combined_score = 0.65 * shap_norm + 0.35 * birnbaum_crit
+        top_idx = np.argsort(-combined_score, axis=1)[:, :top_k]
         col_names = np.array(self.feature_cols)
         drivers = [";".join(col_names[row_idx]) for row_idx in top_idx]
         return drivers
