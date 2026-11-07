@@ -314,28 +314,45 @@ def _render_chat_sidebar(
                 st.selectbox(
                     "AI Model (when API Key is provided)",
                     [
-                        "gemini-2.5-pro",
-                        "gemini-2.5-flash",
                         "gemini-2.0-flash",
+                        "gemini-2.5-flash",
+                        "gemini-2.5-pro",
                     ],
                     index=0,
                     help=(
-                        "Select the primary LLM model. Also auto-detects OpenAI (gpt-4o if key starts with sk-...) "
+                        "Select the primary LLM model (gemini-2.0-flash is fastest and has the highest free quota). "
+                        "Also auto-detects OpenAI (gpt-4o-mini / gpt-4o if key starts with sk-...) "
                         "or Groq (llama-3.3-70b-versatile if key starts with gsk_...)."
                     ),
                     key="preferred_llm_model",
                 )
-                st.text_input(
+                key_val = st.text_input(
                     "API Key (Gemini AIza..., OpenAI sk-..., or Groq gsk_...)",
+                    value=st.session_state.get("saved_llm_api_key", ""),
                     type="default",
-                    placeholder="Paste API key here (masked automatically)...",
+                    placeholder="Paste API key here & press Enter...",
                     help="Masked via CSS (-webkit-text-security: disc) so Chrome's Google Password Manager never pops up.",
                     key="gemini_api_key_input",
                 )
-                if st.button("🗑️ Clear Chat History", use_container_width=True):
-                    st.session_state.te_chat_messages = st.session_state.te_chat_messages[:1]
-                    st.rerun()
-
+                if key_val is not None:
+                    st.session_state.saved_llm_api_key = key_val.strip()
+                active_key_now = st.session_state.get("saved_llm_api_key", "").strip()
+                if active_key_now:
+                    if active_key_now.startswith(("AIza", "sk-", "gsk_")):
+                        st.caption(f"🟢 **Live API Key active** (`{active_key_now[:6]}...`)")
+                    else:
+                        st.caption("⚠️ **Unrecognized key prefix** — use Gemini (`AIza...`), OpenAI (`sk-...`), or Groq (`gsk_...`).")
+                else:
+                    st.caption("⚪ **Built-in Local Engine active** (paste key above for live LLM)")
+                col_save, col_clr = st.columns(2, gap="small")
+                with col_save:
+                    if st.button("💾 Apply Key", use_container_width=True):
+                        st.session_state.saved_llm_api_key = (st.session_state.get("gemini_api_key_input") or "").strip()
+                        st.rerun()
+                with col_clr:
+                    if st.button("🗑️ Clear Chat", use_container_width=True):
+                        st.session_state.te_chat_messages = st.session_state.te_chat_messages[:1]
+                        st.rerun()
         # 1. TOP: Scrollable Chat History Container
         chat_box = st.container(height=500, border=True, key="te_ai_chat_box")
 
@@ -388,8 +405,8 @@ def _render_chat_sidebar(
                 origin_df=origin_df,
                 briefing=briefing,
                 selected_origin=selected_origin,
-                api_key=st.session_state.get("gemini_api_key_input", ""),
-                preferred_model=st.session_state.get("preferred_llm_model", "gemini-2.5-pro"),
+                api_key=st.session_state.get("saved_llm_api_key") or st.session_state.get("gemini_api_key_input", ""),
+                preferred_model=st.session_state.get("preferred_llm_model", "gemini-2.0-flash"),
                 ui_context=ui_context,
                 chat_history=prior_history,
             )

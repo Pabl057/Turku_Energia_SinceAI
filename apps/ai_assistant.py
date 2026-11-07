@@ -182,28 +182,77 @@ User Question: {question}
 """
 
 
-def _call_llm_api(prompt: str, api_key: str, preferred_model: str = "gemini-2.5-pro") -> tuple[str | None, str | None]:
-    """Call Google Gemini (2.5 Pro / 2.5 Flash / 2.0 Flash), OpenAI (gpt-4o), or Groq (Llama 3.3 70B)."""
-    key = api_key.strip()
+def _discover_env_api_key() -> str:
+    """Discover LLM API key from environment variables or local .env files."""
+    for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY"):
+        val = os.environ.get(var, "").strip()
+        if val:
+            return val
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel in (".env", "api_key.env"):
+        env_path = os.path.join(root, rel)
+        if os.path.isfile(env_path):
+            try:
+                with open(env_path, encoding="utf-8") as fh:
+                    for line in fh:
+                        m = re.match(
+                            r"^\s*(?:GEMINI_API_KEY|GOOGLE_API_KEY|OPENAI_API_KEY|GROQ_API_KEY)\s*=\s*(.+?)\s*$",
+                            line,
+                        )
+                        if m:
+                            candidate = m.group(1).strip().strip("\"'")
+                            if candidate:
+                                return candidate
+            except OSError:
+                pass
+    return ""
+
+
+def _extract_gemini_text(data: dict) -> str | None:
+    """Extract text parts from Gemini response safely (handling 2.5 thinking parts)."""
+    candidates = data.get("candidates") or []
+    if not candidates:
+        return None
+    content = candidates[0].get("content") or {}
+    parts = content.get("parts") or []
+    non_thought = [p["text"] for p in parts if isinstance(p, dict) and p.get("text") and not p.get("thought")]
+    if non_thought:
+        return "\n".join(non_thought).strip()
+    any_text = [p["text"] for p in parts if isinstance(p, dict) and p.get("text")]
+    if any_text:
+        return "\n".join(any_text).strip()
+    return None
+
+
+def _call_llm_api(prompt: str, api_key: str, preferred_model: str = "gemini-2.0-flash") -> tuple[str | None, str | None]:
+    """Call Google Gemini (2.0 Flash / 2.5 Flash / 2.5 Pro), OpenAI (gpt-4o), or Groq (Llama 3.3 70B)."""
+    key = api_key.strip().strip("\"'")
+    if not key:
+        return None, None
 
     # 1. OpenAI API key support (sk-...)
     if key.startswith("sk-"):
-        try:
-            resp = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={
-                    "model": "gpt-4o",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.25,
-                    "max_tokens": 700,
-                },
-                timeout=15,
-            )
-            if resp.status_code == 200:
-                return resp.json()["choices"][0]["message"]["content"], "GPT-4o · Live"
-        except Exception:
-            pass
+        last_err = None
+        for oai_model in ("gpt-4o-mini", "gpt-4o"):
+            try:
+                resp = requests.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    json={
+                        "model": oai_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.25,
+                        "max_tokens": 900,
+                    },
+                    timeout=18,
+                )
+                if resp.status_code == 200:
+                    return resp.json()["choices"][0]["message"]["content"], f"{oai_model} · Live"
+                err_json = resp.json() if resp.content else {}
+                last_err = err_json.get("error", {}).get("message", f"HTTP {resp.status_code}")
+            except Exception as exc:
+                last_err = str(exc)
+        return None, f"OpenAI API: {last_err}"
 
     # 2. Groq API key support (gsk_...)
     if key.startswith("gsk_"):
@@ -215,45 +264,68 @@ def _call_llm_api(prompt: str, api_key: str, preferred_model: str = "gemini-2.5-
                     "model": "llama-3.3-70b-versatile",
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.25,
-                    "max_tokens": 700,
+                    "max_tokens": 900,
                 },
-                timeout=15,
+                timeout=18,
             )
             if resp.status_code == 200:
                 return resp.json()["choices"][0]["message"]["content"], "Llama 3.3 70B · Live"
-        except Exception:
-            pass
+            err_json = resp.json() if resp.content else {}
+            return None, f"Groq API: {err_json.get('error', {}).get('message', f'HTTP {resp.status_code}')}"
+        except Exception as exc:
+            return None, f"Groq API: {exc}"
 
-    # 3. Google Gemini API (Try preferred model first, then fallback across 2.5-pro, 2.5-flash, 2.0-flash)
+    # Detect if user accidentally pasted a non-LLM key (e.g. Pruna AI key instead of Gemini AIza... key)
+    if not key.startswith("AIza") and len(key) < 38:
+        return (
+            None,
+            "Key format not recognized (expected Google Gemini 'AIza...', OpenAI 'sk-...', or Groq 'gsk_...')",
+        )
+
+    # 3. Google Gemini API (Try preferred model first, then fast fallback across 2.0-flash, 2.5-flash, 2.5-pro)
     gemini_order = [preferred_model] + [
-        m for m in ("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro")
+        m for m in ("gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash")
         if m != preferred_model
     ]
     last_err = None
     for model_name in gemini_order:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
+            gen_cfg: dict = {"temperature": 0.25, "maxOutputTokens": 2048}
+            if "2.5" in model_name:
+                gen_cfg["thinkingConfig"] = {"thinkingBudget": 512}
             resp = requests.post(
                 url,
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.25, "maxOutputTokens": 750},
+                    "generationConfig": gen_cfg,
                 },
-                timeout=16,
+                timeout=18,
             )
+            if resp.status_code == 400 and "thinkingConfig" in gen_cfg:
+                gen_cfg.pop("thinkingConfig", None)
+                resp = requests.post(
+                    url,
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": gen_cfg,
+                    },
+                    timeout=18,
+                )
             if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    text = candidates[0]["content"]["parts"][0]["text"]
+                text = _extract_gemini_text(resp.json())
+                if text:
                     return text, f"{model_name} · Live"
+                last_err = f"{model_name} returned empty response"
             else:
                 err_json = resp.json() if resp.content else {}
-                last_err = err_json.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                msg = err_json.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                last_err = msg
+                if resp.status_code in (400, 401, 403) and "API key not valid" in msg:
+                    break
         except Exception as exc:
             last_err = str(exc)
     return None, last_err
-
 
 def _build_reasoning_trace(
     question: str,
@@ -348,7 +420,7 @@ def _generate_explainability_response_core(
     briefing: dict,
     selected_origin: pd.Timestamp,
     api_key: str | None = None,
-    preferred_model: str = "gemini-2.5-pro",
+    preferred_model: str = "gemini-2.0-flash",
     ui_context: dict | None = None,
     chat_history: list[dict] | None = None,
 ) -> dict:
@@ -362,15 +434,10 @@ def _generate_explainability_response_core(
     origin_pos = ui.get("origin_pos_str", "1 / 673")
     cutoff_str = ui.get("cutoff_str", selected_origin.strftime("%Y-%m-%d %H:%M:%SZ"))
 
-    effective_key = (
-        api_key
-        or os.environ.get("GEMINI_API_KEY")
-        or os.environ.get("GOOGLE_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-        or ""
-    ).strip()
+    effective_key = (api_key or "").strip() or _discover_env_api_key()
+    api_error_note = ""
 
-    # 1. Try Live LLM (Gemini 2.5 Pro / Flash, GPT-4o, or Llama 3.3 70B) if API key is present
+    # 1. Try Live LLM (Gemini 2.0/2.5 Flash/Pro, GPT-4o, or Llama 3.3 70B) if API key is present
     if effective_key:
         prompt = _build_grounded_context_prompt(
             question=question,
@@ -380,15 +447,33 @@ def _generate_explainability_response_core(
             ui_context=ui_context,
             chat_history=chat_history,
         )
-        llm_text, model_label = _call_llm_api(prompt, effective_key, preferred_model=preferred_model)
+        llm_text, model_or_err = _call_llm_api(prompt, effective_key, preferred_model=preferred_model)
         if llm_text:
             return {
                 "markdown": llm_text,
                 "driver_weights": driver_weights,
-                "source": model_label or "Gemini · Live",
+                "source": model_or_err or "Gemini · Live",
             }
+        if model_or_err:
+            if is_de:
+                api_error_note = (
+                    f"> ⚠️ **API-Key-Hinweis:** Live-LLM-Aufruf nicht möglich (*{model_or_err}*). "
+                    f"Antwort wird über die lokale TreeSHAP-Engine berechnet:\n\n"
+                )
+            else:
+                api_error_note = (
+                    f"> ⚠️ **API Key Note:** Live LLM call did not succeed (*{model_or_err}*). "
+                    f"Showing local TreeSHAP & data engine analysis below:\n\n"
+                )
 
-    # 2. Built-in Context-Aware Knowledge & Data Engine (when no external API key is entered)
+    def _pack(md_body: str, drvs: list[dict], src: str) -> dict:
+        return {
+            "markdown": api_error_note + md_body,
+            "driver_weights": drvs,
+            "source": src,
+        }
+
+    # 2. Built-in Context-Aware Knowledge & Data Engine
     q_low = question.lower()
     spot_mean = float(origin_df["spot_price"].mean())
     spot_min = float(origin_df["spot_price"].min())
@@ -397,11 +482,138 @@ def _generate_explainability_response_core(
     peak_row = origin_df.loc[origin_df["p50"].idxmax()]
     min_row = origin_df.loc[origin_df["p50"].idxmin()]
     hi_row = origin_df.loc[origin_df["p_spike_high"].idxmax()]
+    lo_row = origin_df.loc[origin_df["p_spike_low"].idxmax()]
+    top_drv_names = ", ".join(d["driver"] for d in driver_weights[:3]) or "Day-Ahead Spot Price"
 
-    # --- Topic 0: Bilingual knowledge base covering every single UI element ---
+    # --- Priority 1: Specific Hour or Step (e.g. "at 05:15", "um 14 Uhr", "Step 12") ---
+    if matched_rows is not None and matched_label is not None:
+        table_lines = [
+            "| UTC | Spot → P50 | P10–P90 | Spike Hi/Lo |",
+            "| :--- | :---: | :---: | :---: |",
+        ]
+        for _, r in matched_rows.iterrows():
+            t_str = pd.Timestamp(r["delivery_start_utc"]).strftime("%H:%M")
+            table_lines.append(
+                f"| **{t_str}** | {r['spot_price']:.0f} → **{r['p50']:.1f} €** | "
+                f"{r['p10']:.0f}..{r['p90']:.0f} € | {r['p_spike_high']:.0%} / {r['p_spike_low']:.0%} |"
+            )
+        mean_p50 = float(matched_rows["p50"].mean())
+        mean_spot = float(matched_rows["spot_price"].mean())
+        mean_wind = float(matched_rows["wind_da"].mean())
+        mean_cons = float(matched_rows["cons_da"].mean())
+        mean_res = float(matched_rows["residual_load_da"].mean())
+        if is_de:
+            md = (
+                f"**Analyse für `{matched_label}`** *(Origin {selected_origin.strftime('%H:%M UTC')})*\n\n"
+                f"* **Prognose-Mittel (P50):** **{mean_p50:.2f} €/MWh** ({mean_p50 - mean_spot:+.2f} € vs. Spot `{mean_spot:.2f} €`)\n"
+                f"* **Netz-Fundamentaldaten:** Last **{mean_cons:,.0f} MW** · Wind **{mean_wind:,.0f} MW** · Residuallast **{mean_res:,.0f} MW**\n"
+                f"* **Haupttreiber (TreeSHAP):** {top_drv_names}\n\n"
+                + "\n".join(table_lines)
+            )
+        else:
+            md = (
+                f"**Breakdown for `{matched_label}`** *(Origin {selected_origin.strftime('%H:%M UTC')})*\n\n"
+                f"* **Mean Forecast (P50):** **{mean_p50:.2f} €/MWh** ({mean_p50 - mean_spot:+.2f} € vs. Spot `{mean_spot:.2f} €`)\n"
+                f"* **Grid Fundamentals:** Load **{mean_cons:,.0f} MW** · Wind **{mean_wind:,.0f} MW** · Residual **{mean_res:,.0f} MW**\n"
+                f"* **Primary SHAP Drivers:** {top_drv_names}\n\n"
+                + "\n".join(table_lines)
+            )
+        return _pack(md, driver_weights, "TreeSHAP Engine")
+
+    # --- Priority 2: Spike Risk Summary & Peak Analysis (Quick Button #2 & spike questions) ---
+    if (
+        any(k in q_low for k in ("spike risk", "spike-risiko", "when does it peak", "why is there a spike", "preis-spike", "preisspitze"))
+        or ("spike" in q_low and "chart" not in q_low and "diagramm" not in q_low and "card" not in q_low and "filter" not in q_low)
+    ):
+        hi_t = pd.Timestamp(hi_row["delivery_start_utc"]).strftime("%H:%M UTC")
+        lo_t = pd.Timestamp(lo_row["delivery_start_utc"]).strftime("%H:%M UTC")
+        hi_cnt = int((origin_df["p_spike_high"] >= 0.30).sum())
+        lo_cnt = int((origin_df["p_spike_low"] >= 0.30).sum())
+        top_risk = origin_df.assign(
+            _max_spk=origin_df[["p_spike_high", "p_spike_low"]].max(axis=1)
+        ).sort_values("_max_spk", ascending=False).head(4).sort_values("step")
+        t_rows = [
+            "| UTC | Spot → P50 | P10–P90 | Spike Hi / Lo |",
+            "| :--- | :---: | :---: | :---: |",
+        ]
+        for _, r in top_risk.iterrows():
+            ts = pd.Timestamp(r["delivery_start_utc"]).strftime("%H:%M")
+            t_rows.append(
+                f"| **{ts}** | {r['spot_price']:.0f} → **{r['p50']:.1f} €** | "
+                f"{r['p10']:.0f}..{r['p90']:.0f} € | **{r['p_spike_high']:.1%}** / {r['p_spike_low']:.1%} |"
+            )
+        if is_de:
+            status_line = (
+                f"🚨 **Aktive Spike-Warnung:** `{hi_cnt}` Hochpreis-Schritte und `{lo_cnt}` Tiefpreis-Schritte überschreiten die **30 %-Warnschwelle**."
+                if (hi_cnt or lo_cnt)
+                else "✅ **Unterhalb der 30 %-Warnschwelle:** In diesem 10h-Fenster überschreitet kein Schritt die 30 %-Marke."
+            )
+            md = (
+                f"**⚡ Preis-Spike-Risiko im 10h-Horizont (`{selected_origin.strftime('%H:%M UTC')}`)**\n\n"
+                f"* {status_line}\n"
+                f"* **Peak High-Spike (`> Spot + 50 €`):** **{briefing['max_p_hi']:.1%}** um **`{hi_t}`** *(P50 `{hi_row['p50']:.1f} €` vs. Spot `{hi_row['spot_price']:.1f} €`, P90 `{hi_row['p90']:.1f} €`)*\n"
+                f"* **Peak Low-Spike (`< Spot − 50 €`):** **{briefing['max_p_lo']:.1%}** um **`{lo_t}`** *(P50 `{lo_row['p50']:.1f} €`, P10 `{lo_row['p10']:.1f} €`)*\n"
+                f"* **Physikalische Treiber (SHAP):** **{top_drv_names}** *(Residuallast Ø `{float(origin_df['residual_load_da'].mean()):,.0f} MW`, dominante Richtung: `{briefing['dominant_dir']}`)*\n\n"
+                + "\n".join(t_rows)
+            )
+        else:
+            status_line = (
+                f"🚨 **Active Spike Alert:** `{hi_cnt}` high-spike step(s) and `{lo_cnt}` low-spike step(s) exceed the **30% alert threshold**."
+                if (hi_cnt or lo_cnt)
+                else "✅ **Below 30% Alert Threshold:** No quarter-hour step crosses the 30% warning threshold in this 10h window."
+            )
+            md = (
+                f"**⚡ Spike Risk Summary (`{selected_origin.strftime('%H:%M UTC')}` + 10h)**\n\n"
+                f"* {status_line}\n"
+                f"* **Peak High-Spike (`> Spot + 50 €`):** **{briefing['max_p_hi']:.1%}** at **`{hi_t}`** *(P50 `{hi_row['p50']:.1f} €` vs. Spot `{hi_row['spot_price']:.1f} €`, P90 `{hi_row['p90']:.1f} €`)*\n"
+                f"* **Peak Low-Spike (`< Spot − 50 €`):** **{briefing['max_p_lo']:.1%}** at **`{lo_t}`** *(P50 `{lo_row['p50']:.1f} €`, P10 `{lo_row['p10']:.1f} €`)*\n"
+                f"* **Physical Drivers (SHAP):** **{top_drv_names}** *(Mean residual load `{float(origin_df['residual_load_da'].mean()):,.0f} MW`, dominant mFRR: `{briefing['dominant_dir']}`)*\n\n"
+                + "\n".join(t_rows)
+            )
+        return _pack(md, driver_weights, "TreeSHAP Engine")
+
+    # --- Priority 3: Highest / Lowest / Cheapest / Most Expensive Price ---
+    if any(k in q_low for k in ("highest", "lowest", "cheapest", "most expensive", "höchste", "niedrigste", "günstigste", "teuerste", "max price", "min price", "peak price")):
+        t_pk = pd.Timestamp(peak_row["delivery_start_utc"]).strftime("%H:%M UTC")
+        t_mn = pd.Timestamp(min_row["delivery_start_utc"]).strftime("%H:%M UTC")
+        if is_de:
+            md = (
+                f"**Höchster & niedrigster prognostizierter Preis (`{selected_origin.strftime('%H:%M UTC')}` + 10h)**\n\n"
+                f"* **📈 Höchster Preis (P50 Maximum):** **{peak_row['p50']:.2f} €/MWh** um **`{t_pk}`** *(Spot: `{peak_row['spot_price']:.2f} €`, 80%-Band: `{peak_row['p10']:.1f}` bis `{peak_row['p90']:.1f} €`, High-Spike: `{peak_row['p_spike_high']:.1%}`)*\n"
+                f"* **📉 Niedrigster Preis (P50 Minimum):** **{min_row['p50']:.2f} €/MWh** um **`{t_mn}`** *(Spot: `{min_row['spot_price']:.2f} €`, 80%-Band: `{min_row['p10']:.1f}` bis `{min_row['p90']:.1f} €`, Low-Spike: `{min_row['p_spike_low']:.1%}`)*\n"
+                f"* **10h-Durchschnitt:** P50 **`{p50_mean:.2f} €/MWh`** vs. Spot **`{spot_mean:.2f} €/MWh`** *(Spread `{p50_mean - spot_mean:+.2f} €`)*"
+            )
+        else:
+            md = (
+                f"**Highest & Lowest Forecasted Prices (`{selected_origin.strftime('%H:%M UTC')}` + 10h)**\n\n"
+                f"* **📈 Highest Price (P50 Peak):** **{peak_row['p50']:.2f} €/MWh** at **`{t_pk}`** *(Spot: `{peak_row['spot_price']:.2f} €`, 80% band: `{peak_row['p10']:.1f}` to `{peak_row['p90']:.1f} €`, High-Spike: `{peak_row['p_spike_high']:.1%}`)*\n"
+                f"* **📉 Lowest Price (P50 Min):** **{min_row['p50']:.2f} €/MWh** at **`{t_mn}`** *(Spot: `{min_row['spot_price']:.2f} €`, 80% band: `{min_row['p10']:.1f}` to `{min_row['p90']:.1f} €`, Low-Spike: `{min_row['p_spike_low']:.1%}`)*\n"
+                f"* **10h Mean:** P50 **`{p50_mean:.2f} €/MWh`** vs. Spot **`{spot_mean:.2f} €/MWh`** *(Spread `{p50_mean - spot_mean:+.2f} €`)*"
+            )
+        return _pack(md, driver_weights, "TreeSHAP Engine")
+
+    # --- Priority 4: General "What drives the price / Which features are important?" ---
+    if any(k in q_low for k in ("what drives", "what features drive", "main drivers", "top drivers", "which features", "was treibt", "welche treiber", "welche features", "haupttreiber", "wichtigsten treiber")):
+        drv_bullets = "\n".join(f"  {i+1}. **{d['driver']}** (`{d['pct']:.1f}%` Horizon-Gewicht)" for i, d in enumerate(driver_weights))
+        if is_de:
+            md = (
+                f"**🔍 Wichtigste Preistreiber (TreeSHAP) für Origin `{selected_origin.strftime('%H:%M UTC')}`**\n\n"
+                f"{drv_bullets}\n\n"
+                f"* **Spot-Anker:** Ø `{spot_mean:.2f} €/MWh` → **KI-P50:** Ø `{p50_mean:.2f} €/MWh` *(Spread `{p50_mean - spot_mean:+.2f} €`)*\n"
+                f"* **Netz-Kontext:** Last Ø `{float(origin_df['cons_da'].mean()):,.0f} MW` · Wind Ø `{float(origin_df['wind_da'].mean()):,.0f} MW` · Dominante Regelrichtung: **{briefing['dominant_dir']}**"
+            )
+        else:
+            md = (
+                f"**🔍 Primary Price Drivers (TreeSHAP) for Origin `{selected_origin.strftime('%H:%M UTC')}`**\n\n"
+                f"{drv_bullets}\n\n"
+                f"* **Spot Anchor:** Mean `{spot_mean:.2f} €/MWh` → **AI P50:** Mean `{p50_mean:.2f} €/MWh` *(Spread `{p50_mean - spot_mean:+.2f} €`)*\n"
+                f"* **Grid Context:** Load Mean `{float(origin_df['cons_da'].mean()):,.0f} MW` · Wind Mean `{float(origin_df['wind_da'].mean()):,.0f} MW` · Dominant Direction: **{briefing['dominant_dir']}**"
+            )
+        return _pack(md, driver_weights, "TreeSHAP Engine")
+
+    # --- Topic 0: Bilingual knowledge base covering specific UI elements & charts ---
     kb_entry = match_kb_entry(question)
     if kb_entry is not None:
-        lo_row = origin_df.loc[origin_df["p_spike_low"].idxmax()]
         kb_ctx = {
             "origin": selected_origin.strftime("%Y-%m-%d %H:%M UTC"),
             "cutoff": cutoff_str,
@@ -427,13 +639,13 @@ def _generate_explainability_response_core(
             "cons_mean": float(origin_df["cons_da"].mean()),
             "wind_mean": float(origin_df["wind_da"].mean()),
             "res_mean": float(origin_df["residual_load_da"].mean()),
-            "top_drivers": ", ".join(d["driver"] for d in driver_weights[:3]) or "–",
+            "top_drivers": top_drv_names,
         }
-        return {
-            "markdown": render_kb_entry(kb_entry, is_de, kb_ctx),
-            "driver_weights": driver_weights if kb_entry["id"] in ("top_shap", "waterfall", "heatmap") else [],
-            "source": "Dashboard Copilot",
-        }
+        return _pack(
+            render_kb_entry(kb_entry, is_de, kb_ctx),
+            driver_weights if kb_entry["id"] in ("top_shap", "waterfall", "heatmap") else [],
+            "Dashboard Copilot",
+        )
     # --- Topic A: Dataset Period / Test vs Validation Period ---
     if any(k in q_low for k in ("dataset period", "test period", "validation period", "periode", "zeitraum", "welcher datensatz", "which period", "dataset")):
         if is_de:
@@ -454,7 +666,7 @@ def _generate_explainability_response_core(
                 f"1. **Test Period (5 Oct – 1 Nov 2026):** The official competition evaluation period containing **673 hourly forecast origins** × 40 steps = 26,920 predictions (`forecast_backtest.csv`).\n"
                 f"2. **Validation Period (7 Sep – 4 Oct 2026):** The historical walk-forward period where realized ground-truth prices are known, allowing you to toggle **“🎯 Overlay Actual Prices (Hindsight)”** to compare forecasts against reality."
             )
-        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+        return _pack(md, [], "Dashboard Copilot")
 
     # --- Topic B: Spot Price (Day-Ahead Spotpreis) ---
     if any(k in q_low for k in ("spot", "spotpreis", "nord pool", "nordpool", "day-ahead", "day ahead")):
@@ -476,46 +688,7 @@ def _generate_explainability_response_core(
                 f"* **Mean AI Forecast (P50):** `{p50_mean:.2f} €/MWh` *(Spread vs. Spot: **{p50_mean - spot_mean:+.2f} €/MWh**)*\n\n"
                 f"💡 *When the Imbalance Price (P50) rises above Spot, the grid is in deficit (Up-Regulation); when it drops below Spot, the grid has surplus power (Down-Regulation).*"
             )
-        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
-
-    # --- Topic C: Specific Hour or Step (e.g. "14:00", "um 8 Uhr", "Step 12") ---
-    if matched_rows is not None and matched_label is not None:
-        table_lines = [
-            "| UTC | Spot → P50 | P10–P90 | Spike Hi/Lo |",
-            "| :--- | :---: | :---: | :---: |",
-        ]
-        for _, r in matched_rows.iterrows():
-            t_str = pd.Timestamp(r["delivery_start_utc"]).strftime("%H:%M")
-            table_lines.append(
-                f"| **{t_str}** | {r['spot_price']:.0f} → **{r['p50']:.1f} €** | "
-                f"{r['p10']:.0f}..{r['p90']:.0f} € | {r['p_spike_high']:.0%} / {r['p_spike_low']:.0%} |"
-            )
-
-        mean_p50 = float(matched_rows["p50"].mean())
-        mean_spot = float(matched_rows["spot_price"].mean())
-        mean_wind = float(matched_rows["wind_da"].mean())
-        mean_cons = float(matched_rows["cons_da"].mean())
-        mean_res = float(matched_rows["residual_load_da"].mean())
-        top_drv_names = ", ".join(d["driver"] for d in driver_weights[:3])
-
-        if is_de:
-            md = (
-                f"**Analyse für `{matched_label}`** *(Origin {selected_origin.strftime('%H:%M UTC')})*\n\n"
-                f"* **Prognose-Mittel (P50):** **{mean_p50:.2f} €/MWh** ({mean_p50 - mean_spot:+.2f} € vs. Spot)\n"
-                f"* **Netz-Fundamentaldaten:** Last **{mean_cons:,.0f} MW** · Wind **{mean_wind:,.0f} MW** · Residuallast **{mean_res:,.0f} MW**\n"
-                f"* **Haupttreiber (SHAP):** {top_drv_names}\n\n"
-                + "\n".join(table_lines)
-            )
-        else:
-            md = (
-                f"**Breakdown for `{matched_label}`** *(Origin {selected_origin.strftime('%H:%M UTC')})*\n\n"
-                f"* **Mean Forecast (P50):** **{mean_p50:.2f} €/MWh** ({mean_p50 - mean_spot:+.2f} € vs. Spot)\n"
-                f"* **Grid Fundamentals:** Load **{mean_cons:,.0f} MW** · Wind **{mean_wind:,.0f} MW** · Residual **{mean_res:,.0f} MW**\n"
-                f"* **Primary SHAP Drivers:** {top_drv_names}\n\n"
-                + "\n".join(table_lines)
-            )
-        return {"markdown": md, "driver_weights": driver_weights, "source": "TreeSHAP Engine"}
-
+        return _pack(md, [], "Dashboard Copilot")
     # --- Topic D: Quantiles / P10 / P50 / P90 / Confidence Band / Fan Chart ---
     if any(k in q_low for k in ("p10", "p50", "p90", "quantil", "quantile", "konfidenz", "confidence", "uncertainty", "unsicherheit", "fan chart", "band")):
         if is_de:
@@ -534,7 +707,7 @@ def _generate_explainability_response_core(
                 f"* **P90 (90th Percentile Upper Bound):** Only a 10% chance the actual price exceeds this line.\n"
                 f"* **80% Confidence Interval (`P10–P90`):** The shaded fan between P10 and P90 averages **{briefing['mean_band']:.1f} €/MWh** in width for this origin and achieves an exact **80.0% empirical coverage** on validation data."
             )
-        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+        return _pack(md, [], "Dashboard Copilot")
 
     # --- Topic E: Forecast Origin / Time Machine / Quick Filter / Top 20 ---
     if any(k in q_low for k in ("origin", "time machine", "filter", "top 20", "schnellfilter", "quick filter")):
@@ -558,7 +731,7 @@ def _generate_explainability_response_core(
                 f"  * **Spike Alert Origins Only (≥ 30%):** Filters to origins with active spike alerts.\n"
                 f"  * **Top 20 High / Low Spike Origins:** Jumps straight to the 20 origins with the highest probability of upward surges (`> Spot + 50 €`) or downward drops (`< Spot − 50 €`)."
             )
-        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+        return _pack(md, [], "Dashboard Copilot")
 
     # --- Topic F: Anti-Leakage Gate (Rule #1) ---
     if any(k in q_low for k in ("leakage", "rule #1", "rule 1", "cutoff", "first_usable", "gate", "regel 1")):
@@ -578,7 +751,7 @@ def _generate_explainability_response_core(
                 f"* **Latest Input Telemetry (`Data Cutoff`):** `{cutoff_str}`\n"
                 f"* **Status:** `✓ Verified: first_usable_origin_utc ≤ t` (Accounts for 30-min publication lag on real-time load/flows and 60-min lag on mFRR/aFRR balancing series)."
             )
-        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+        return _pack(md, [], "Dashboard Copilot")
 
     # --- Topic G: mFRR Balancing Direction (Up / Down / None) ---
     if any(k in q_low for k in ("mfrr", "direction", "regelrichtung", "up-regulation", "down-regulation", "up regulation", "down regulation", "deficit", "surplus")):
@@ -600,7 +773,7 @@ def _generate_explainability_response_core(
                 f"* **Up-Regulation (Orange):** Grid power deficit — balancing assets ramp up, pushing the imbalance price above Spot.\n"
                 f"* **Down-Regulation (Turquoise):** Grid power surplus — generation curtails or flexible boilers absorb load, pushing price below Spot."
             )
-        return {"markdown": md, "driver_weights": [], "source": "TreeSHAP Engine"}
+        return _pack(md, [], "TreeSHAP Engine")
 
     # --- Topic H: Wind / Consumption / Residual Load / Physical Grid ---
     if any(k in q_low for k in ("wind", "verbrauch", "consumption", "load", "residual", "residuallast", "solar", "mw")):
@@ -623,7 +796,7 @@ def _generate_explainability_response_core(
                 f"* **Residual Load (`Load − Wind − Solar`):** Mean **{r_mean:,.0f} MW**\n\n"
                 f"💡 *High residual load indicates tight conventional supply and elevated upward spike risk, whereas low/negative residual load signals wind surplus.*"
             )
-        return {"markdown": md, "driver_weights": [], "source": "FeatureStore Engine"}
+        return _pack(md, [], "FeatureStore Engine")
 
     # --- Topic I: Forecast Revision vs. Previous Hour (t - 1h) ---
     if any(k in q_low for k in ("previous", "revision", "changed", "change", "drift", "t-1", "t−1", "vorstunde", "geändert", "änderung")):
@@ -653,7 +826,7 @@ def _generate_explainability_response_core(
                 f"* **Root Cause:** Newly published real-time telemetry prior to `{selected_origin.strftime('%H:%M UTC')}` (30m load lag & 60m balancing lag).\n"
                 f"* {status_txt}"
             )
-        return {"markdown": md, "driver_weights": driver_weights, "source": "TreeSHAP Engine"}
+        return _pack(md, driver_weights, "TreeSHAP Engine")
 
     # --- Topic J: Operational Suggestions / Actions ---
     if any(k in q_low for k in ("action", "recommend", "suggestion", "review", "supervisor", "trader", "dispatch", "empfehlung", "maßnahme", "schichtleiter", "tun")):
@@ -705,7 +878,7 @@ def _generate_explainability_response_core(
                     f"2. **Grid Tendency:** Dominant direction is **{briefing['dominant_dir']}** — maintain baseline schedule."
                 )
             md = f"**Operational Suggestions to Review**\n\n{rec}\n\n*Note: Decision support based on public market data — not automated plant switching commands.*"
-        return {"markdown": md, "driver_weights": driver_weights, "source": "Decision Support"}
+        return _pack(md, driver_weights, "Decision Support")
 
     # --- Topic K: Buttons, Toggles, Controls & UI Elements ---
     if any(k in q_low for k in ("button", "knopf", "toggle", "schalter", "zahnrad", "gear", "settings", "einstellung", "dark mode", "light mode", "hindsight", "json", "download", "api payload", "reasoning", "gedankengang")):
@@ -741,7 +914,7 @@ def _generate_explainability_response_core(
                 "  * **✨ Quick Questions:** 4 one-click operational prompts.\n"
                 "  * **🧠 Show Model Reasoning:** Toggles the step-by-step Chain-of-Thought reasoning trace above each answer."
             )
-        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+        return _pack(md, [], "Dashboard Copilot")
 
     # --- Topic L: All Graphs, Charts, Waterfall, Heatmap, Birnbaum & XAI ---
     if any(k in q_low for k in ("graph", "chart", "diagramm", "kurve", "waterfall", "wasserfall", "heatmap", "birnbaum", "xai", "shap", "scatter", "ablation", "wilcoxon", "t-test", "tab")):
@@ -779,7 +952,7 @@ def _generate_explainability_response_core(
                 "4. **Tab 4 – 🔌 40-Step Data Table & JSON API:**\n"
                 "   * Full 40-step table and downloadable REST JSON payload."
             )
-        return {"markdown": md, "driver_weights": driver_weights, "source": "Dashboard Copilot"}
+        return _pack(md, driver_weights, "Dashboard Copilot")
 
     # --- Topic M: Website / Dashboard / Model / Benchmark ---
     if any(k in q_low for k in ("website", "webseite", "dashboard", "model", "modell", "baseline", "accuracy", "mae", "pinball", "brier", "benchmark", "wie funktioniert", "how does", "what is this", "erklär")):
@@ -797,7 +970,7 @@ def _generate_explainability_response_core(
                 "* **Historical Time Machine (Left):** Step through all **673 hourly origins** (`Test Period` or `Validation Period`) and pre-filter for **Spike Alerts (≥ 30%)** or **Top 20 High/Low Spike Origins**.\n"
                 "* **Validation Benchmark (Tab 3):** Our LightGBM + Conformal suite cuts **P50 MAE by 35%** (`43.19` vs. `66.20 €/MWh` baseline), halves **Pinball Loss** (`12.43` vs. `24.18`), and hits **exact 80.0% P10–P90 coverage**."
             )
-        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+        return _pack(md, [], "Dashboard Copilot")
 
     # --- Default: Horizon & Spike Summary in the user's language (German or English) ---
     top_drv_names = ", ".join(d["driver"] for d in driver_weights[:3])
@@ -827,8 +1000,4 @@ def _generate_explainability_response_core(
             f"| **Max Risk** | {t_hi} | {hi_row['spot_price']:.0f} → **{hi_row['p50']:.1f} €** | **Hi {hi_row['p_spike_high']:.1%}** |\n\n"
             f"💡 *Ask e.g. “What is the Spot Price?”, “What is the Dataset Period?”, “What drives the price at {t_peak}?”, or “Explain P10 and P90.”*"
         )
-    return {
-        "markdown": md,
-        "driver_weights": driver_weights,
-        "source": "TreeSHAP Engine",
-    }
+    return _pack(md, driver_weights, "TreeSHAP Engine")
