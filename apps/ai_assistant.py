@@ -141,32 +141,28 @@ def _build_grounded_context_prompt(
         else "IMPORTANT: The user asks in ENGLISH – respond only in English."
     ) + " (General rule: always reply in the same language as the user's question.)"
 
+    matched_kb = match_kb_entry(question)
+    kb_hint = ""
+    if matched_kb is not None:
+        kb_title, kb_body = matched_kb["en"]
+        kb_hint = f"\nRelevant UI Component Reference ({kb_title}):\n{kb_body}\n"
+
     return f"""You are the intelligent AI Assistant for the Turku Energia Imbalance Price Situational Desk.
 {lang_instruction}
 
 Formatting Rules for Sidebar Display:
-- Directly answer the user's specific question first! Never ignore their question or output a generic summary if they ask a specific concept or UI question.
+- Directly answer the user's specific question first! Never ignore their question or output a generic summary.
 - Keep answers concise, well-structured, and easy to read.
 - If you include a Markdown table, use AT MOST 4 short columns (`| UTC | Spot → P50 | P10–P90 | Spike |`) so there is zero horizontal scrolling.
 - Frame operational advice as "Suggestions to Review" (Prüf-Empfehlungen), never as automated switching commands.
 
-Complete UI & Website Context (What the user is looking at right now):
-1. **Active Dataset Period (`1. Dataset Period` in left sidebar)**: Currently set to **`{active_period}`**.
-   - *Test Period (5 Oct – 1 Nov 2026)*: The official competition test window with 673 hourly forecast origins × 40 quarter-hour steps = 26,920 rows (`forecast_backtest.csv`).
-   - *Validation Period (7 Sep – 4 Oct 2026)*: The historical walk-forward validation window (672 origins, 26,700 scored rows) where realized ground-truth imbalance prices are available for Hindsight comparison.
-2. **Active Quick Filter (`2. Origin Filter & Time Step`)**: Currently set to **`{active_filter}`** (Position `{origin_pos}`).
-   - Filters the hourly forecast origins `t` chronologically, by active Spike Warnings (≥ 30%), or by the Top 20 High-Price / Low-Price Spike risk hours.
-3. **Selected Forecast Origin (`t`)**: **`{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`** (Data Cutoff: `{cutoff_str}`).
-4. **Anti-Leakage Gate (Rule #1)**: Enforces `first_usable_origin_utc <= t`. Only data officially published at or before `t` is used.
-5. **Key Domain Concepts on the Dashboard**:
-   - **Day-Ahead Spot Price (`Spotpreis`)**: The Nord Pool day-ahead auction price for Finland (€/MWh), published every day at ~14:00 CET for the next day. It serves as the known anchor price. In the current 10h window (`{selected_origin.strftime('%H:%M UTC')}`), the Spot Price averages **{spot_mean:.2f} €/MWh** (min `{spot_min:.2f} €`, max `{spot_max:.2f} €`).
-   - **Imbalance Price (`Ausgleichspreis` — P10 / P50 / P90)**: Fingrid's 15-minute settlement price for grid imbalances. `P50` is our AI median forecast (currently averaging **{p50_mean:.2f} €/MWh**), `P10` is the 10th percentile lower bound, and `P90` is the 90th percentile upper bound (`P10–P90` = 80% confidence band).
-   - **Price Spikes (`Spike Probability`)**: Defined in the challenge as an imbalance price deviating by more than ±50 €/MWh from the Spot Price (`High Spike > Spot + 50 €`, `Low Spike < Spot - 50 €`). A 30% probability triggers an operational alert.
-   - **mFRR Balancing Direction (`Up / Down / None`)**: Manual Frequency Restoration Reserve direction in Finland. `Up-Regulation` = power deficit in the grid (plants ramp up, imbalance price rises above Spot). `Down-Regulation` = power surplus (e.g. high wind, plants ramp down / boilers turn on, price drops below Spot). `None` = balanced grid.
-   - **Model Suite & Benchmark (Tab 3)**: Dual-depth LightGBM quantile & classification suite + Conformal Calibration + TreeSHAP. Beats the official baseline on every metric: P50 MAE improved by 35% (`43.19` vs `66.20 €/MWh`), Mean Pinball Loss cut by 49% (`12.43` vs `24.18`), P10–P90 coverage hits exact `80.0%` target, Spike Brier `0.0928`, Direction Brier `0.4222`.
-Reference of EVERY UI element on the website (header, sidebar, 5 KPI cards, 4 alert banners, all charts/tables in the 4 tabs, AI controls). `<live>` = value of the current origin, see live data below:
-{kb_digest_for_llm()}
-
+Active Dashboard State:
+- Dataset Period: `{active_period}` | Filter: `{active_filter}` ({origin_pos})
+- Forecast Origin `t`: `{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}` (Data Cutoff: `{cutoff_str}`, Rule #1 `first_usable_origin_utc <= t` verified)
+- Spot Price (Nord Pool D-1 14:00): Mean `{spot_mean:.2f} €/MWh` (Min `{spot_min:.2f} €`, Max `{spot_max:.2f} €`)
+- Imbalance Price Forecast (P50): Mean `{p50_mean:.2f} €/MWh` | 80% Confidence Band (`P10–P90`) Mean Width: `{briefing['mean_band']:.1f} €/MWh`
+- Validation Benchmark (Tab 3): Dual-depth LightGBM + Conformal Calibration + TreeSHAP cuts P50 MAE by 35% (`43.19` vs `66.20 €/MWh` baseline), halves Pinball Loss (`12.43` vs `24.18`), hits exact `80.0%` P10–P90 coverage, Spike Brier `0.0928`, Direction Brier `0.4132`.
+{kb_hint}
 Live Data Summary for Current Origin `t = {selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`:
 - Dominant Balancing Direction: {briefing['dominant_dir']} (Mean P_Up={briefing['mean_p_up']:.1%}, Mean P_Down={briefing['mean_p_down']:.1%})
 - Peak High-Spike Risk: {briefing['max_p_hi']:.1%} at {pd.Timestamp(peak_hi_row['delivery_start_utc']).strftime('%H:%M UTC')} (P50={peak_hi_row['p50']:.1f} € vs Spot={peak_hi_row['spot_price']:.1f} €)
@@ -224,13 +220,40 @@ def _extract_gemini_text(data: dict) -> str | None:
     return None
 
 
-def _call_llm_api(prompt: str, api_key: str, preferred_model: str = "gemini-2.0-flash") -> tuple[str | None, str | None]:
-    """Call Google Gemini (2.0 Flash / 2.5 Flash / 2.5 Pro), OpenAI (gpt-4o), or Groq (Llama 3.3 70B)."""
+def _call_llm_api(prompt: str, api_key: str, preferred_model: str | None = None) -> tuple[str | None, str | None]:
+    """Automatically detect provider from API key and call the best available live model."""
     key = api_key.strip().strip("\"'")
     if not key:
         return None, None
 
-    # 1. OpenAI API key support (sk-...)
+    # 1. Anthropic Claude API key support (sk-ant-...)
+    if key.startswith("sk-ant-"):
+        try:
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "claude-3-5-sonnet-latest",
+                    "max_tokens": 900,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=18,
+            )
+            if resp.status_code == 200:
+                blocks = resp.json().get("content", [])
+                txt = "\n".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+                if txt:
+                    return txt, "Claude · Live"
+            err_json = resp.json() if resp.content else {}
+            return None, f"Anthropic API: {err_json.get('error', {}).get('message', f'HTTP {resp.status_code}')}"
+        except Exception as exc:
+            return None, f"Anthropic API: {exc}"
+
+    # 2. OpenAI API key support (sk-...)
     if key.startswith("sk-"):
         last_err = None
         for oai_model in ("gpt-4o-mini", "gpt-4o"):
@@ -247,14 +270,14 @@ def _call_llm_api(prompt: str, api_key: str, preferred_model: str = "gemini-2.0-
                     timeout=18,
                 )
                 if resp.status_code == 200:
-                    return resp.json()["choices"][0]["message"]["content"], f"{oai_model} · Live"
+                    return resp.json()["choices"][0]["message"]["content"], "OpenAI · Live"
                 err_json = resp.json() if resp.content else {}
                 last_err = err_json.get("error", {}).get("message", f"HTTP {resp.status_code}")
             except Exception as exc:
                 last_err = str(exc)
         return None, f"OpenAI API: {last_err}"
 
-    # 2. Groq API key support (gsk_...)
+    # 3. Groq API key support (gsk_...)
     if key.startswith("gsk_"):
         try:
             resp = requests.post(
@@ -269,7 +292,7 @@ def _call_llm_api(prompt: str, api_key: str, preferred_model: str = "gemini-2.0-
                 timeout=18,
             )
             if resp.status_code == 200:
-                return resp.json()["choices"][0]["message"]["content"], "Llama 3.3 70B · Live"
+                return resp.json()["choices"][0]["message"]["content"], "Groq · Live"
             err_json = resp.json() if resp.content else {}
             return None, f"Groq API: {err_json.get('error', {}).get('message', f'HTTP {resp.status_code}')}"
         except Exception as exc:
@@ -279,21 +302,24 @@ def _call_llm_api(prompt: str, api_key: str, preferred_model: str = "gemini-2.0-
     if not key.startswith("AIza") and len(key) < 38:
         return (
             None,
-            "Key format not recognized (expected Google Gemini 'AIza...', OpenAI 'sk-...', or Groq 'gsk_...')",
+            "Key format not recognized (expected Google AI Studio 'AIza...', OpenAI 'sk-...', or Groq 'gsk_...')",
         )
 
-    # 3. Google Gemini API (Try preferred model first, then fast fallback across 2.0-flash, 2.5-flash, 2.5-pro)
-    gemini_order = [preferred_model] + [
-        m for m in ("gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash")
-        if m != preferred_model
+    # 4. Google AI Studio (Gemini) — automatically cascades across current active models
+    gemini_models = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3-flash-preview",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash",
     ]
     last_err = None
-    for model_name in gemini_order:
+    for model_name in gemini_models:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
             gen_cfg: dict = {"temperature": 0.25, "maxOutputTokens": 2048}
-            if "2.5" in model_name:
-                gen_cfg["thinkingConfig"] = {"thinkingBudget": 512}
+            if "2.5" in model_name or "3-" in model_name:
+                gen_cfg["thinkingConfig"] = {"thinkingBudget": 256}
             resp = requests.post(
                 url,
                 json={
@@ -315,7 +341,7 @@ def _call_llm_api(prompt: str, api_key: str, preferred_model: str = "gemini-2.0-
             if resp.status_code == 200:
                 text = _extract_gemini_text(resp.json())
                 if text:
-                    return text, f"{model_name} · Live"
+                    return text, "Gemini · Live"
                 last_err = f"{model_name} returned empty response"
             else:
                 err_json = resp.json() if resp.content else {}
