@@ -51,6 +51,12 @@ FEATURE_DRIVER_NAMES: dict[str, str] = {
     "last_mfrr_down_spread": "mfrr_down_price_spread",
     "last_afrr_up_price": "afrr_up_price",
     "last_afrr_down_price": "afrr_down_price",
+    "last_afrr_up_spread": "afrr_up_price_spread",
+    "last_afrr_down_spread": "afrr_down_price_spread",
+    "spot_lead_1h": "spot_price_1h_lead_ramp",
+    "se1_load_da_at_delivery": "sweden_se1_load_forecast",
+    "se3_load_da_at_delivery": "sweden_se3_load_forecast",
+    "ee_load_da_at_delivery": "estonia_ee_load_forecast",
     "se1_imb_spread_120m": "sweden_se1_imbalance_spread",
     "se3_imb_spread_120m": "sweden_se3_imbalance_spread",
     "ee_imb_spread_120m": "estonia_ee_imbalance_spread",
@@ -208,6 +214,8 @@ def build_feature_Frame(
     afrr_dn_ff = afrr_dn_p_s.ffill(limit=8)
     ocols["last_afrr_up_price"] = afrr_up_ff.reindex(t60_idx).to_numpy()
     ocols["last_afrr_down_price"] = afrr_dn_ff.reindex(t60_idx).to_numpy()
+    ocols["last_afrr_up_spread"] = ocols["last_afrr_up_price"] - ocols["last_spot_at_60m"]
+    ocols["last_afrr_down_spread"] = ocols["last_afrr_down_price"] - ocols["last_spot_at_60m"]
     ocols["last_afrr_up_active"] = afrr_up_p_s.notna().astype(float).rolling(4, min_periods=1).mean().reindex(t60_idx).to_numpy()
     ocols["last_afrr_down_active"] = afrr_dn_p_s.notna().astype(float).rolling(4, min_periods=1).mean().reindex(t60_idx).to_numpy()
 
@@ -327,6 +335,9 @@ def build_feature_Frame(
     scols["wind_share_da_at_delivery"] = wind_deliv / (cons_deliv + 1.0)
     scols["net_ee_cap_at_delivery"] = ee_fi_cap - fi_ee_cap
 
+    scols["se1_load_da_at_delivery"] = store.lookup_at("se1_load_fc_da", delivery_idx, orig_expanded_idx)
+    scols["se3_load_da_at_delivery"] = store.lookup_at("se3_load_fc_da", delivery_idx, orig_expanded_idx)
+    scols["ee_load_da_at_delivery"] = store.lookup_at("ee_load_fc_da", delivery_idx, orig_expanded_idx)
     # Day-ahead ramps leading up to delivery_start_utc
     deliv_m1h = delivery_idx - pd.Timedelta(hours=1)
     deliv_m3h = delivery_idx - pd.Timedelta(hours=3)
@@ -344,6 +355,9 @@ def build_feature_Frame(
 
     scols["spot_ramp_1h"] = spot_deliv - spot_m1h
     scols["spot_ramp_3h"] = spot_deliv - spot_m3h
+    deliv_p1h = delivery_idx + pd.Timedelta(hours=1)
+    spot_p1h = store.lookup_at("fi_spot_price", deliv_p1h, orig_expanded_idx)
+    scols["spot_lead_1h"] = np.where(~np.isnan(spot_p1h), spot_p1h - spot_deliv, 0.0)
     scols["wind_da_ramp_1h"] = wind_deliv - wind_m1h
     scols["wind_da_ramp_3h"] = wind_deliv - wind_m3h
     scols["cons_da_ramp_1h"] = cons_deliv - cons_m1h

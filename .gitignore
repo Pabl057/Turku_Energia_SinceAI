@@ -5,6 +5,7 @@
 venv/
 .venv/
 
+forecast_backtest.csv
 
 # Generated evaluation outputs, local caches, and API secrets
 /baseline_output/

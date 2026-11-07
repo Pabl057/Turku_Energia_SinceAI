@@ -28,9 +28,20 @@ DIRECTION_TO_INT = {1.0: 0, -1.0: 1, 0.0: 2}
 INT_TO_DIRECTION = {0: "up", 1: "down", 2: "none"}
 
 
+def _predict_3class_proba(clf: lgb.LGBMClassifier, X: pd.DataFrame) -> np.ndarray:
+    """Return (N, 3) probability matrix aligned to class indices 0 (up), 1 (down), 2 (none)."""
+    raw = np.asarray(clf.predict_proba(X), dtype=float)
+    if raw.ndim == 1:
+        raw = raw[:, None]
+    out = np.zeros((len(X), 3), dtype=float)
+    for idx, cls_id in enumerate(clf.classes_):
+        out[:, int(cls_id)] = raw[:, idx]
+    return out
+
+
 @dataclass
 class ImbalanceModelSuite:
-    """Trained 6-model LightGBM suite for imbalance price, quantiles, direction, and spikes."""
+    """Trained LightGBM suite with short-horizon specialists and Empirical Bayes calibration."""
 
     feature_cols: list[str]
     m_p50: lgb.LGBMRegressor
@@ -40,9 +51,13 @@ class ImbalanceModelSuite:
     m_spike_high: lgb.LGBMClassifier
     m_spike_low: lgb.LGBMClassifier
     cutoff_origin_utc: pd.Timestamp
+    m_p50_short: lgb.LGBMRegressor | None = None
+    m_dir_short: lgb.LGBMClassifier | None = None
+    prior_up: float = 0.35
+    prior_down: float = 0.64
+    prior_none: float = 0.01
     interval_scale: float = 1.25
     spike_clf_weight: float = 0.50
-
     def compute_shap_values(self, X: pd.DataFrame) -> np.ndarray:
         """Compute exact TreeSHAP values for the P50 spread model (via shap.TreeExplainer or native C++ TreeSHAP)."""
         # LightGBM's pred_contrib=True computes exact Lundberg & Lee TreeSHAP values (last col is expected_value)
@@ -78,8 +93,16 @@ class ImbalanceModelSuite:
         """Generate post-processed, constraint-compliant predictions for df_features."""
         X = df_features[self.feature_cols]
         spot = df_features["spot_at_delivery"].to_numpy(dtype=float)
+        steps = df_features["step"].to_numpy(dtype=float)
 
-        sp50 = np.asarray(self.m_p50.predict(X), dtype=float)
+        sp50_full = np.asarray(self.m_p50.predict(X), dtype=float)
+        if self.m_p50_short is not None:
+            sp50_short = np.asarray(self.m_p50_short.predict(X), dtype=float)
+            w_p50_sh = np.where(steps <= 4, 0.55, np.where(steps <= 8, 0.25, 0.0))
+            sp50 = (1.0 - w_p50_sh) * sp50_full + w_p50_sh * sp50_short
+        else:
+            sp50 = sp50_full
+
         raw_sp10 = np.asarray(self.m_p10.predict(X), dtype=float)
         raw_sp90 = np.asarray(self.m_p90.predict(X), dtype=float)
 
@@ -91,13 +114,32 @@ class ImbalanceModelSuite:
         p10 = spot + sp10
         p90 = spot + sp90
 
-        # Direction probabilities
-        p_dir = np.asarray(self.m_dir.predict_proba(X), dtype=float)
-        p_up = p_dir[:, 0]
-        p_down = p_dir[:, 1]
-        p_none = p_dir[:, 2]
+        # Direction probabilities + short-horizon specialist + adaptive Empirical Bayes Brier shrinkage
+        p_dir_full = _predict_3class_proba(self.m_dir, X)
+        if self.m_dir_short is not None:
+            p_dir_short = _predict_3class_proba(self.m_dir_short, X)
+            w_dir_sh = np.where(steps <= 4, 0.50, np.where(steps <= 8, 0.25, 0.0))[:, None]
+            p_dir = (1.0 - w_dir_sh) * p_dir_full + w_dir_sh * p_dir_short
+        else:
+            p_dir = p_dir_full
 
-        # Spike probabilities: blend binary classifier with two-piece quantile tail probability
+        if (
+            "mfrr_up_share_96q" in df_features.columns
+            and "mfrr_dn_share_96q" in df_features.columns
+            and "mfrr_none_share_96q" in df_features.columns
+        ):
+            pr_up = 0.60 * self.prior_up + 0.40 * df_features["mfrr_up_share_96q"].to_numpy(dtype=float)
+            pr_dn = 0.60 * self.prior_down + 0.40 * df_features["mfrr_dn_share_96q"].to_numpy(dtype=float)
+            pr_no = 0.60 * self.prior_none + 0.40 * df_features["mfrr_none_share_96q"].to_numpy(dtype=float)
+        else:
+            pr_up = self.prior_up
+            pr_dn = self.prior_down
+            pr_no = self.prior_none
+
+        alpha_dir = np.where(steps <= 4, 0.85, np.where(steps <= 8, 0.75, 0.65))
+        p_up = alpha_dir * p_dir[:, 0] + (1.0 - alpha_dir) * pr_up
+        p_down = alpha_dir * p_dir[:, 1] + (1.0 - alpha_dir) * pr_dn
+        p_none = alpha_dir * p_dir[:, 2] + (1.0 - alpha_dir) * pr_no
         c_hi = np.asarray(self.m_spike_high.predict_proba(X), dtype=float)[:, 1]
         c_lo = np.asarray(self.m_spike_low.predict_proba(X), dtype=float)[:, 1]
 
@@ -116,8 +158,8 @@ class ImbalanceModelSuite:
             top_drivers = ["day_ahead_spot_price;recent_imbalance_spread;residual_load_forecast"] * len(df_features)
 
         out = pd.DataFrame({
-            "forecast_origin_utc": df_features["forecast_origin_utc"].values,
-            "delivery_start_utc": df_features["delivery_start_utc"].values,
+            "forecast_origin_utc": df_features["forecast_origin_utc"].to_numpy(),
+            "delivery_start_utc": df_features["delivery_start_utc"].to_numpy(),
             "step": df_features["step"].to_numpy(dtype=int),
             "p10": p10,
             "p50": p50,
@@ -127,7 +169,7 @@ class ImbalanceModelSuite:
             "p_none": p_none,
             "p_spike_high": p_spike_high,
             "p_spike_low": p_spike_low,
-            "data_cutoff_utc": df_features["data_cutoff_utc"].values,
+            "data_cutoff_utc": df_features["data_cutoff_utc"].to_numpy(),
             "top_drivers": top_drivers,
         })
         return enforce_prediction_constraints(out)
@@ -209,7 +251,6 @@ def train_model_suite(
 
     age_days = (cutoff - orig_idx).total_seconds().to_numpy() / 86400.0
     sample_weight = np.exp(-age_days / recency_halflife_days)
-
     reg_params: dict[str, Any] = dict(
         learning_rate=0.025,
         num_leaves=23,
@@ -221,7 +262,21 @@ def train_model_suite(
         reg_alpha=3.0,
         reg_lambda=15.0,
         random_state=RANDOM_SEED,
-        n_jobs=-1,
+        n_jobs=4,
+        verbose=-1,
+    )
+    short_reg_params: dict[str, Any] = dict(
+        learning_rate=0.03,
+        num_leaves=23,
+        min_child_samples=60,
+        n_estimators=260,
+        subsample=0.8,
+        subsample_freq=1,
+        colsample_bytree=0.75,
+        reg_alpha=1.5,
+        reg_lambda=8.0,
+        random_state=RANDOM_SEED,
+        n_jobs=4,
         verbose=-1,
     )
     clf_params: dict[str, Any] = dict(
@@ -235,7 +290,21 @@ def train_model_suite(
         reg_alpha=5.0,
         reg_lambda=20.0,
         random_state=RANDOM_SEED,
-        n_jobs=-1,
+        n_jobs=4,
+        verbose=-1,
+    )
+    short_clf_params: dict[str, Any] = dict(
+        learning_rate=0.025,
+        num_leaves=15,
+        min_child_samples=120,
+        n_estimators=190,
+        subsample=0.8,
+        subsample_freq=1,
+        colsample_bytree=0.65,
+        reg_alpha=3.0,
+        reg_lambda=15.0,
+        random_state=RANDOM_SEED,
+        n_jobs=4,
         verbose=-1,
     )
 
@@ -253,6 +322,20 @@ def train_model_suite(
     m_hi.fit(X_tr, y_hi, sample_weight=sample_weight)
     m_lo.fit(X_tr, y_lo, sample_weight=sample_weight)
 
+    # Train Short-Horizon Specialists on steps 1..8 (first 2 hours where real-time grid inertia dominates)
+    short_mask = (tr["step"] <= 8).to_numpy()
+    w_short = np.clip(np.exp(-age_days[short_mask] / 42.0), 0.20, 1.0)
+    m_p50_short = lgb.LGBMRegressor(objective="regression_l1", **short_reg_params)
+    m_dir_short = lgb.LGBMClassifier(objective="multiclass", num_class=3, **short_clf_params)
+    m_p50_short.fit(X_tr.loc[short_mask], y_spread[short_mask], sample_weight=w_short)
+    m_dir_short.fit(X_tr.loc[short_mask], y_dir[short_mask], sample_weight=w_short)
+
+    # Compute recency-weighted Empirical Bayes direction priors strictly from training data
+    w_prior = np.exp(-age_days / 14.0)
+    prior_up = float(np.average(y_dir == 0, weights=w_prior))
+    prior_down = float(np.average(y_dir == 1, weights=w_prior))
+    prior_none = float(np.average(y_dir == 2, weights=w_prior))
+
     return ImbalanceModelSuite(
         feature_cols=feature_cols,
         m_p50=m_p50,
@@ -262,7 +345,65 @@ def train_model_suite(
         m_spike_high=m_hi,
         m_spike_low=m_lo,
         cutoff_origin_utc=cutoff,
+        m_p50_short=m_p50_short,
+        m_dir_short=m_dir_short,
+        prior_up=prior_up,
+        prior_down=prior_down,
+        prior_none=prior_none,
     )
+
+
+def apply_temporal_ensembling(
+    pred_df: pd.DataFrame,
+    min_step_for_blend: int = 5,
+    max_prev_weight: float = 0.15,
+) -> pd.DataFrame:
+    """Step-dependent Temporal Ensembling across consecutive hourly forecast origins."""
+    out = pred_df.sort_values(["forecast_origin_utc", "step"]).reset_index(drop=True).copy()
+    orig_ts = pd.to_datetime(out["forecast_origin_utc"], utc=True)
+    deliv_ts = pd.to_datetime(out["delivery_start_utc"], utc=True)
+
+    prev_cols = [
+        "p10",
+        "p50",
+        "p90",
+        "p_up",
+        "p_down",
+        "p_none",
+        "p_spike_high",
+        "p_spike_low",
+    ]
+    prev = out[prev_cols].copy()
+    prev["next_origin_utc"] = orig_ts + pd.Timedelta(hours=1)
+    prev["delivery_ts"] = deliv_ts
+
+    merged = pd.DataFrame({
+        "orig_ts": orig_ts,
+        "delivery_ts": deliv_ts,
+        "step": out["step"].to_numpy(dtype=float),
+    }).merge(
+        prev,
+        left_on=["orig_ts", "delivery_ts"],
+        right_on=["next_origin_utc", "delivery_ts"],
+        how="left",
+    )
+
+    steps = merged["step"].to_numpy(dtype=float)
+    w_prev = np.where(
+        steps < min_step_for_blend,
+        0.0,
+        max_prev_weight * np.minimum(1.0, (steps - min_step_for_blend + 1.0) / 16.0),
+    )
+    has_prev = merged["p50"].notna().to_numpy()
+    w_prev = np.where(has_prev, w_prev, 0.0)
+    w_curr = 1.0 - w_prev
+
+    for col in prev_cols:
+        curr_vals = out[col].to_numpy(dtype=float)
+        prev_vals = np.where(has_prev, merged[col].to_numpy(dtype=float), curr_vals)
+        out[col] = w_curr * curr_vals + w_prev * prev_vals
+
+    return enforce_prediction_constraints(out)
 
 
 def walk_forward_predict(
@@ -310,5 +451,5 @@ def walk_forward_predict(
         raise RuntimeError("No predictions generated in walk_forward_predict.")
 
     full_pred = pd.concat(pred_parts, ignore_index=True)
-    full_pred = full_pred.sort_values(["forecast_origin_utc", "step"]).reset_index(drop=True)
+    full_pred = apply_temporal_ensembling(full_pred, min_step_for_blend=5, max_prev_weight=0.15)
     return full_pred, last_suite
