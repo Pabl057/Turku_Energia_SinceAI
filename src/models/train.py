@@ -39,6 +39,26 @@ def _predict_3class_proba(clf: lgb.LGBMClassifier, X: pd.DataFrame) -> np.ndarra
     return out
 
 
+VOLUME_PRICING_CLASSIFIER_ONLY_COLS: set[str] = {
+    "afrr_mfrr_up_gap_60m",
+    "afrr_mfrr_dn_gap_60m",
+    "afrr_mfrr_up_gap_mean_4q",
+    "afrr_mfrr_dn_gap_mean_4q",
+    "implied_mfrr_weight_60m",
+    "implied_mfrr_weight_mean_4q",
+    "implied_mfrr_weight_mean_16q",
+    "implied_afrr_vol_60m",
+    "implied_afrr_vol_mean_4q",
+    "wind_rt_at_origin",
+    "wind_rt_error_at_origin",
+    "wind_rt_error_mean_4q",
+    "wind_rt_ramp_1h",
+    "nuclear_rt_at_origin",
+    "nuclear_rt_ramp_1h",
+    "grid_state_rt_at_origin",
+}
+
+
 @dataclass
 class ImbalanceModelSuite:
     """Trained LightGBM suite with short-horizon specialists and Empirical Bayes calibration."""
@@ -51,6 +71,8 @@ class ImbalanceModelSuite:
     m_spike_high: lgb.LGBMClassifier
     m_spike_low: lgb.LGBMClassifier
     cutoff_origin_utc: pd.Timestamp
+    reg_feature_cols: list[str] | None = None
+    m_p50_deep: lgb.LGBMRegressor | None = None
     m_p50_short: lgb.LGBMRegressor | None = None
     m_dir_short: lgb.LGBMClassifier | None = None
     prior_up: float = 0.35
@@ -61,11 +83,19 @@ class ImbalanceModelSuite:
     conformal_shift_lo: float = -0.5
     conformal_shift_hi: float = 7.0
     spike_clf_weight: float = 0.45
+    spike_dir_coupling: float = 0.18
     def compute_shap_values(self, X: pd.DataFrame) -> np.ndarray:
         """Compute exact TreeSHAP values for the P50 spread model (via shap.TreeExplainer or native C++ TreeSHAP)."""
-        # LightGBM's pred_contrib=True computes exact Lundberg & Lee TreeSHAP values (last col is expected_value)
-        contribs = np.asarray(self.m_p50.predict(X[self.feature_cols], pred_contrib=True), dtype=float)
-        return contribs[:, :-1]
+        reg_cols = self.reg_feature_cols or self.feature_cols
+        contribs = np.asarray(self.m_p50.predict(X[reg_cols], pred_contrib=True), dtype=float)
+        if reg_cols == self.feature_cols:
+            return contribs[:, :-1]
+        full = np.zeros((len(X), len(self.feature_cols)), dtype=float)
+        col_to_idx = {c: i for i, c in enumerate(self.feature_cols)}
+        for j, c in enumerate(reg_cols):
+            if c in col_to_idx:
+                full[:, col_to_idx[c]] = contribs[:, j]
+        return full
 
     def build_shap_explainer(self) -> shap.TreeExplainer:
         """Return a shap.TreeExplainer instance for interactive inspection."""
@@ -95,10 +125,17 @@ class ImbalanceModelSuite:
     def predict_frame(self, df_features: pd.DataFrame, include_shap: bool = True) -> pd.DataFrame:
         """Generate post-processed, constraint-compliant predictions for df_features."""
         X = df_features[self.feature_cols]
+        reg_cols = self.reg_feature_cols or self.feature_cols
+        X_reg = df_features[reg_cols]
         spot = df_features["spot_at_delivery"].to_numpy(dtype=float)
         steps = df_features["step"].to_numpy(dtype=float)
 
-        sp50_full = np.asarray(self.m_p50.predict(X), dtype=float)
+        sp50_base = np.asarray(self.m_p50.predict(X_reg), dtype=float)
+        if self.m_p50_deep is not None:
+            sp50_deep = np.asarray(self.m_p50_deep.predict(X_reg), dtype=float)
+            sp50_full = 0.60 * sp50_base + 0.40 * sp50_deep
+        else:
+            sp50_full = sp50_base
         if self.m_p50_short is not None:
             sp50_short = np.asarray(self.m_p50_short.predict(X), dtype=float)
             w_p50_sh = np.where(steps <= 4, 0.55, np.where(steps <= 8, 0.25, 0.0))
@@ -106,8 +143,8 @@ class ImbalanceModelSuite:
         else:
             sp50 = sp50_full
 
-        raw_sp10 = np.asarray(self.m_p10.predict(X), dtype=float)
-        raw_sp90 = np.asarray(self.m_p90.predict(X), dtype=float)
+        raw_sp10 = np.asarray(self.m_p10.predict(X_reg), dtype=float)
+        raw_sp90 = np.asarray(self.m_p90.predict(X_reg), dtype=float)
 
         # Split Conformal Dispersion Scaling around P50 spread (calibrated for exact 80.00% coverage & minimal pinball loss)
         sp10 = sp50 - self.conformal_scale_lo * np.maximum(1.0, sp50 - raw_sp10) + self.conformal_shift_lo
@@ -154,6 +191,15 @@ class ImbalanceModelSuite:
         w = self.spike_clf_weight
         p_spike_high = w * c_hi + (1.0 - w) * q_hi
         p_spike_low = w * c_lo + (1.0 - w) * q_lo
+
+        # Physical regime coupling (Lever A): positive price spikes (> spot + 50) require
+        # upward regulation (deficit), while negative spikes (< spot - 50) require downward regulation.
+        if self.spike_dir_coupling > 0.0:
+            b = self.spike_dir_coupling
+            ref_up = max(self.prior_up, 0.20)
+            ref_dn = max(self.prior_down, 0.20)
+            p_spike_high = np.clip(p_spike_high * (1.0 + b * (p_up - ref_up) / ref_up), 0.0, 1.0)
+            p_spike_low = np.clip(p_spike_low * (1.0 + b * (p_down - ref_dn) / ref_dn), 0.0, 1.0)
 
         if include_shap:
             top_drivers, _ = self.top_drivers_for_frame(X, top_k=3)
@@ -235,10 +281,23 @@ def train_model_suite(
     feature_cols: list[str],
     cutoff_origin_utc: pd.Timestamp,
     recency_halflife_days: float = 60.0,
+    min_price_target_utc: pd.Timestamp | str = "2026-05-31T21:00:00Z",
 ) -> ImbalanceModelSuite:
-    """Train the 6 LightGBM models on historical training rows strictly before cutoff_origin_utc."""
+    """Train the 6 LightGBM models on historical training rows strictly before cutoff_origin_utc.
+
+    Enforces the Hackathon Q&A rule on pre-June data: while pre-June aFRR/mFRR series can be used
+    as historical lag buffers and physical regulation features, realized `imbalance_price` targets
+    are strictly restricted to `delivery_start_utc >= min_price_target_utc` (start of the June 2026
+    volume-based imbalance pricing methodology).
+    """
     cutoff = to_utc(cutoff_origin_utc)
-    valid = df_train["target_spread"].notna() & df_train["target_direction"].notna()
+    regime_start = to_utc(min_price_target_utc)
+    deliv_all = pd.DatetimeIndex(pd.to_datetime(df_train["delivery_start_utc"], utc=True))
+    valid = (
+        df_train["target_spread"].notna()
+        & df_train["target_direction"].notna()
+        & (deliv_all >= regime_start)
+    )
     tr = df_train.loc[valid].reset_index(drop=True)
 
     # Verify strict anti-leakage on training origins
@@ -246,7 +305,9 @@ def train_model_suite(
     if not (orig_idx <= cutoff).all():
         raise AssertionError("Training data contains forecast_origin_utc after cutoff_origin_utc!")
 
+    reg_feature_cols = [c for c in feature_cols if c not in VOLUME_PRICING_CLASSIFIER_ONLY_COLS]
     X_tr = tr[feature_cols]
+    X_tr_reg = tr[reg_feature_cols]
     y_spread = tr["target_spread"].to_numpy(dtype=float)
     y_dir = tr["target_direction"].map(DIRECTION_TO_INT).to_numpy(dtype=int)
     y_hi = tr["target_spike_high"].to_numpy(dtype=int)
@@ -265,6 +326,20 @@ def train_model_suite(
         reg_alpha=3.0,
         reg_lambda=15.0,
         random_state=RANDOM_SEED,
+        n_jobs=4,
+        verbose=-1,
+    )
+    deep_reg_params: dict[str, Any] = dict(
+        learning_rate=0.02,
+        num_leaves=15,
+        min_child_samples=200,
+        n_estimators=310,
+        subsample=0.75,
+        subsample_freq=1,
+        colsample_bytree=0.55,
+        reg_alpha=5.0,
+        reg_lambda=25.0,
+        random_state=RANDOM_SEED + 101,
         n_jobs=4,
         verbose=-1,
     )
@@ -312,26 +387,36 @@ def train_model_suite(
     )
 
     m_p50 = lgb.LGBMRegressor(objective="regression_l1", **reg_params)
+    m_p50_deep = lgb.LGBMRegressor(objective="regression_l1", **deep_reg_params)
     m_p10 = lgb.LGBMRegressor(objective="quantile", alpha=0.10, **reg_params)
     m_p90 = lgb.LGBMRegressor(objective="quantile", alpha=0.90, **reg_params)
     m_dir = lgb.LGBMClassifier(objective="multiclass", num_class=3, **clf_params)
     m_hi = lgb.LGBMClassifier(objective="binary", **clf_params)
     m_lo = lgb.LGBMClassifier(objective="binary", **clf_params)
 
-    m_p50.fit(X_tr, y_spread, sample_weight=sample_weight)
-    m_p10.fit(X_tr, y_spread, sample_weight=sample_weight)
-    m_p90.fit(X_tr, y_spread, sample_weight=sample_weight)
+    # Full-horizon price & quantile regressors start from June 4 (so all rolling 96q / 72h price
+    # lags are 100% within the post-June volume-based pricing regime)
+    reg_time_mask = np.asarray(orig_idx >= pd.Timestamp("2026-06-04T00:00:00Z"), dtype=bool)
+    if not np.any(reg_time_mask):
+        reg_time_mask = np.ones(len(tr), dtype=bool)
+
+    m_p50.fit(X_tr_reg.loc[reg_time_mask], y_spread[reg_time_mask], sample_weight=sample_weight[reg_time_mask])
+    m_p50_deep.fit(X_tr_reg.loc[reg_time_mask], y_spread[reg_time_mask], sample_weight=sample_weight[reg_time_mask])
+    m_p10.fit(X_tr_reg.loc[reg_time_mask], y_spread[reg_time_mask], sample_weight=sample_weight[reg_time_mask])
+    m_p90.fit(X_tr_reg.loc[reg_time_mask], y_spread[reg_time_mask], sample_weight=sample_weight[reg_time_mask])
     m_dir.fit(X_tr, y_dir, sample_weight=sample_weight)
     m_hi.fit(X_tr, y_hi, sample_weight=sample_weight)
     m_lo.fit(X_tr, y_lo, sample_weight=sample_weight)
 
     # Train Short-Horizon Specialists on steps 1..8 (first 2 hours where real-time grid inertia dominates)
-    short_mask = (tr["step"] <= 8).to_numpy()
-    w_short = np.clip(np.exp(-age_days[short_mask] / 42.0), 0.20, 1.0)
+    short_reg_mask = (tr["step"] <= 8).to_numpy() & reg_time_mask
+    short_clf_mask = (tr["step"] <= 8).to_numpy()
+    w_short_reg = np.clip(np.exp(-age_days[short_reg_mask] / 42.0), 0.20, 1.0)
+    w_short_clf = np.clip(np.exp(-age_days[short_clf_mask] / 42.0), 0.20, 1.0)
     m_p50_short = lgb.LGBMRegressor(objective="regression_l1", **short_reg_params)
     m_dir_short = lgb.LGBMClassifier(objective="multiclass", num_class=3, **short_clf_params)
-    m_p50_short.fit(X_tr.loc[short_mask], y_spread[short_mask], sample_weight=w_short)
-    m_dir_short.fit(X_tr.loc[short_mask], y_dir[short_mask], sample_weight=w_short)
+    m_p50_short.fit(X_tr.loc[short_reg_mask], y_spread[short_reg_mask], sample_weight=w_short_reg)
+    m_dir_short.fit(X_tr.loc[short_clf_mask], y_dir[short_clf_mask], sample_weight=w_short_clf)
 
     # Compute recency-weighted Empirical Bayes direction priors strictly from training data
     w_prior = np.exp(-age_days / 14.0)
@@ -341,7 +426,9 @@ def train_model_suite(
 
     return ImbalanceModelSuite(
         feature_cols=feature_cols,
+        reg_feature_cols=reg_feature_cols,
         m_p50=m_p50,
+        m_p50_deep=m_p50_deep,
         m_p10=m_p10,
         m_p90=m_p90,
         m_dir=m_dir,
