@@ -88,12 +88,13 @@ Maintain clean, modular code to facilitate collaboration across the 4 team membe
 │   ├── forecast_origins.csv   # 673 test forecast origins
 │   ├── sample_submission.csv  # Sample submission format (26,920 rows)
 │   └── quality_report.*   # Data quality reports
-├── docs/                  # Project documentation & hackathon deliverables
+├── docs/                  # Project documentation & hackathon deliverables (MkDocs)
+│   ├── index.md               # Documentation home & Mermaid system overview
 │   ├── CHALLENGE_BRIEF.md     # Official hackathon challenge brief
 │   ├── DATA_MODELS_LICENSES.md # Data sources, models, components & licenses
 │   ├── EVALUATION_REPORT.md   # Level 1 & Level 2 methodology & benchmark report
-│   ├── PROJECT_GUIDE.md       # Architecture & timeline guide
-│   └── notes.md               # Research & exploratory notes
+│   └── PROJECT_GUIDE.md       # Architecture & timeline guide
+├── mkdocs.yml             # MkDocs + Material + Mermaid.js + MathJax configuration
 ├── src/
 │   ├── data/              # Data loading & availability filtering (rows_available_at)
 │   ├── features/          # Feature engineering (Fingrid forecasts, calendar, grid flows)

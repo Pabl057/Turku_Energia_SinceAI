@@ -11,6 +11,7 @@ forecast_backtest.csv
 /baseline_output/
 /results/
 /graphify-out/
+/site/
 .secrets/
 *.env
 /data_cache/

@@ -136,3 +136,20 @@ To inspect or run the official starter baseline notebook interactively:
 ```bash
 ./venv/bin/jupyter lab notebooks/baseline.ipynb
 ```
+
+---
+
+## 6. Documentation Site (`MkDocs` + `Mermaid.js`)
+
+All project documentation under `docs/` (`EVALUATION_REPORT.md`, `PROJECT_GUIDE.md`, `DATA_MODELS_LICENSES.md`, `CHALLENGE_BRIEF.md`) is configured with **Material for MkDocs**, **Mermaid.js** diagram rendering, and **MathJax** LaTeX formulas (`mkdocs.yml`).
+
+### Serve Documentation Locally (with Live Reload)
+```bash
+./venv/bin/mkdocs serve
+```
+Open `http://127.0.0.1:8000` in your browser.
+
+### Build Static HTML Documentation (`./site`)
+```bash
+./venv/bin/mkdocs build --strict
+```
