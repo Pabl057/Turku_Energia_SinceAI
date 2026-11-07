@@ -1,0 +1,26 @@
+1. 💡 Die Idee: Prediction Lags (Autoregressive Features) Neben den historischen Netzsdaten speisen wir die Vorhersagen unserer eigenen vorherigen Modellläufe (z. B. von vor 1 oder 2 Stunden) als zusätzliche Features in die aktuelle Prognose ein. Das hilft dem Modell, zeitliche Trends und Korrekturen (Drift) frühzeitig zu erkennen.
+
+2. 🛡️ Regelkonform (Kein Data Leakage) Da alte Vorhersagen ausschließlich auf Daten basieren, die zum jeweiligen Zeitpunkt bereits vorlagen (first_usable_origin_utc &lt;= t), lecken wir keine Zukunftsdaten.
+
+3. 🎯 Automatisches Gewichtungsverfahren Statt Bauchgefühl-Regeln nutzen wir mathematische Kriterien:
+
+Feature Importance (LightGBM / SHAP): Das Modell lernt selbstständig, wie stark es alten Vorhersagen für nahe Schritte (1–4) vs. spätere Schritte (35–40) vertrauen kann.
+Zeitliches Ensembling: Wir kombinieren Modellläufe über ein gewichtetes Mittel, dessen Faktoren direkt auf das Minimieren von MAE und Pinball Loss optimiert werden.
+
+wäre es schlau das so zu machen. sei ganz kritisch
+
+---
+
+okay erstelle ein neuen branch und implementiere es
+
+---
+
+wie lange braucht das training
+
+---
+
+erklär mal wie gut die ergebnisse
+
+---
+
+ja pushe und dann mach das mit der coverage
