@@ -815,57 +815,100 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         margin: 0;
       }}
 
-      /* Differentiated Chat Bubbles */
+      /* Differentiated Chat Bubbles & Zero-Horizontal-Scroll Chat Layout */
       .te-msg-user {{
         background: var(--te-msg-user-bg);
         color: #FFFFFF !important;
-        padding: 0.75rem 1rem;
-        border-radius: 14px 14px 2px 14px;
-        margin: 0.5rem 0 0.5rem 1.5rem;
-        font-size: 0.88rem;
-        line-height: 1.45;
+        padding: 0.68rem 0.92rem;
+        border-radius: 14px 14px 3px 14px;
+        margin: 0.35rem 0 0.45rem 1.25rem;
+        font-size: 0.86rem;
+        line-height: 1.42;
         border: 1px solid rgba(70, 190, 220, 0.35);
         box-shadow: var(--te-shadow-sm);
+        word-wrap: break-word;
+        overflow-wrap: anywhere;
       }}
 
       .te-msg-user-label {{
-        font-size: 0.7rem;
+        font-size: 0.68rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         color: var(--te-ice);
         font-weight: 700;
-        margin-bottom: 0.2rem;
+        margin-bottom: 0.18rem;
       }}
 
-      .te-msg-ai {{
-        background: var(--te-msg-ai-bg);
-        color: var(--te-text);
-        border: 1px solid var(--te-border);
-        border-left: 4px solid var(--te-orange);
-        padding: 0.65rem 0.9rem;
-        border-radius: 14px 14px 14px 2px;
-        margin: 0.5rem 0.3rem 0.35rem 0;
-        font-size: 0.87rem;
-        line-height: 1.5;
-        box-shadow: var(--te-shadow-sm);
-      }}
-
-      .te-msg-ai-label {{
+      .te-msg-ai-header {{
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
         font-family: 'Fira Sans Extra Condensed', sans-serif;
-        font-size: 0.8rem;
+        font-size: 0.78rem;
         text-transform: uppercase;
         letter-spacing: 0.04em;
         color: var(--te-turquoise);
         font-weight: 800;
+        background: var(--te-bg-elevated);
+        border: 1px solid var(--te-border);
+        border-left: 3px solid var(--te-orange);
+        padding: 0.2rem 0.62rem;
+        border-radius: 6px;
+        margin-top: 0.25rem;
+        margin-bottom: 0.2rem;
+      }}
+
+      .te-quick-prompts-bar {{
+        font-family: 'Fira Sans Extra Condensed', sans-serif;
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--te-text-muted);
+        margin: 0.35rem 0 0.2rem 0;
         display: flex;
         align-items: center;
-        gap: 0.4rem;
+        justify-content: space-between;
+      }}
+
+      /* Mask API Key Input visually without using type="password" so Google Password Manager never triggers */
+      div.st-key-gemini_api_key_input input {{
+        -webkit-text-security: disc !important;
+        text-security: disc !important;
+        font-family: 'Fira Mono', monospace !important;
+        letter-spacing: 0.06em !important;
+      }}
+
+      /* Compact Markdown Tables inside Chat (No Horizontal Scroll!) */
+      [data-testid="stVerticalBlockBorderWrapper"] .stMarkdown table {{
+        width: 100% !important;
+        table-layout: auto !important;
+        border-collapse: collapse !important;
+        font-size: 0.77rem !important;
+        margin: 0.35rem 0 !important;
+      }}
+
+      [data-testid="stVerticalBlockBorderWrapper"] .stMarkdown th,
+      [data-testid="stVerticalBlockBorderWrapper"] .stMarkdown td {{
+        padding: 0.28rem 0.42rem !important;
+        border: 1px solid var(--te-border) !important;
+        white-space: normal !important;
+        word-break: break-word !important;
+      }}
+
+      [data-testid="stVerticalBlockBorderWrapper"] .stMarkdown th {{
+        background: var(--te-bg-elevated) !important;
+        color: var(--te-turquoise) !important;
+        font-family: 'Fira Sans Extra Condensed', sans-serif !important;
+        font-size: 0.76rem !important;
+        text-transform: uppercase !important;
       }}
 
       /* Feature Weighting Bars inside Chat / Explainability */
       .te-driver-box {{
-        margin-top: 0.45rem;
-        padding: 0.65rem 0.85rem;
+        margin-top: 0.35rem;
+        margin-bottom: 0.25rem;
+        padding: 0.55rem 0.75rem;
         background: var(--te-bg-elevated);
         border-radius: 8px;
         border: 1px solid var(--te-border);
@@ -873,24 +916,25 @@ def inject_brand_css(dark_mode: bool = True) -> str:
 
       .te-driver-box-title {{
         font-family: 'Fira Sans Extra Condensed', sans-serif;
-        font-size: 0.82rem;
+        font-size: 0.76rem;
         font-weight: 700;
         color: var(--te-turquoise);
         text-transform: uppercase;
-        margin-bottom: 0.35rem;
+        margin-bottom: 0.3rem;
       }}
 
       .te-driver-bar-row {{
-        margin: 0.4rem 0;
+        margin: 0.32rem 0;
       }}
 
       .te-driver-bar-top {{
         display: flex;
         justify-content: space-between;
-        font-size: 0.78rem;
+        gap: 0.4rem;
+        font-size: 0.74rem;
         font-weight: 600;
         color: var(--te-text);
-        margin-bottom: 0.15rem;
+        margin-bottom: 0.12rem;
       }}
 
       .te-driver-bar-track {{
@@ -1230,8 +1274,8 @@ def render_alert_cards(alerts: list[dict[str, str]]) -> str:
     return "\n".join(cards_html)
 
 
-def get_toolbar_theme_toggle_html(dark_mode: bool = True) -> str:
-    """Return JS/HTML snippet that mounts a morphing Sun <-> Moon button directly left of 'Deploy'."""
+def get_toolbar_theme_toggle_html(dark_mode: bool = True, chat_msg_count: int = 1) -> str:
+    """Return JS/HTML snippet that mounts a morphing Sun <-> Moon button directly left of 'Deploy' and handles chat auto-scroll."""
     state_cls = "is-dark" if dark_mode else "is-light"
     label_txt = "Dark" if dark_mode else "Light"
     return f"""
@@ -1449,6 +1493,47 @@ def get_toolbar_theme_toggle_html(dark_mode: bool = True) -> str:
         setTimeout(mountButton, 120);
         setTimeout(mountButton, 400);
       }}
+
+      // 2. Prevent Google Password Manager / Autofill on the API Key field
+      function hardenApiKeyInput() {{
+        const apiInput = doc.querySelector('div.st-key-gemini_api_key_input input');
+        if (apiInput) {{
+          apiInput.setAttribute('autocomplete', 'off');
+          apiInput.setAttribute('autocorrect', 'off');
+          apiInput.setAttribute('autocapitalize', 'off');
+          apiInput.setAttribute('spellcheck', 'false');
+          apiInput.setAttribute('data-lpignore', 'true');
+          apiInput.setAttribute('data-1p-ignore', 'true');
+          apiInput.setAttribute('data-form-type', 'other');
+        }}
+      }}
+      hardenApiKeyInput();
+      setTimeout(hardenApiKeyInput, 250);
+
+      // 3. Auto-scroll AI Assistant Chat container to bottom when new messages arrive
+      function scrollChatToBottom() {{
+        const msgCount = {int(chat_msg_count)};
+        const anchor = doc.getElementById('te-chat-bottom-anchor');
+        if (!anchor) return;
+        if (msgCount > 1 && window.parent.__teLastMsgCount !== msgCount) {{
+          window.parent.__teLastMsgCount = msgCount;
+          // Find the scrollable container around the chat messages
+          let el = anchor.parentElement;
+          while (el && el !== doc.body) {{
+            const style = window.parent.getComputedStyle(el);
+            if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {{
+              el.scrollTo({{ top: el.scrollHeight, behavior: 'smooth' }});
+              break;
+            }}
+            el = el.parentElement;
+          }}
+          anchor.scrollIntoView({{ behavior: 'smooth', block: 'end' }});
+        }} else if (msgCount <= 1) {{
+          window.parent.__teLastMsgCount = msgCount;
+        }}
+      }}
+      setTimeout(scrollChatToBottom, 60);
+      setTimeout(scrollChatToBottom, 220);
     }})();
     </script>
     """
