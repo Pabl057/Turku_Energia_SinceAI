@@ -54,6 +54,7 @@ flowchart LR
 
 ## Documentation Sections
 
+- **[System Architecture](ARCHITECTURE.md)** — Visual Mermaid topology of all layers (`src/data`, `src/features`, `src/models`, `src/evaluation`, `apps/dashboard.py`, `tests/`) and how each component works.
 - **[Evaluation Report](EVALUATION_REPORT.md)** — Reasoning chain, physical market mechanics, anti-leakage proof, 181-feature engineering & TreeSHAP gains, calibration methodology, and horizon-by-horizon validation metrics.
 - **[Architecture & Timeline Guide](PROJECT_GUIDE.md)** — Detailed 24-hour causality timeline (D-1 spot/forecasts vs. 30m/60m/120m lag windows), Mermaid sequence/flowchart diagrams, and step-by-step system walkthrough.
 - **[Data Sources, Models & Licenses](DATA_MODELS_LICENSES.md)** — Complete inventory of datasets, publication lag rules, custom LightGBM models, open-source software packages, and Nord Pool licensing governance.
