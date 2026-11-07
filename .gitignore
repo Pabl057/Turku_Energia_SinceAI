@@ -16,6 +16,7 @@ forecast_backtest.csv
 *.env
 /data_cache/
 /organizer_only/
+/pruna_demo/
 # Created by https://www.toptal.com/developers/gitignore/api/windows,macos,visualstudiocode,python,jetbrains
 # Edit at https://www.toptal.com/developers/gitignore?templates=windows,macos,visualstudiocode,python,jetbrains
 
