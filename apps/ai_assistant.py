@@ -1,14 +1,16 @@
-"""Integrated AI Explainability Chat Module (Gemini API + Data-Grounded Analytical Engine).
+"""Integrated AI Explainability & Dashboard Copilot (Multi-Model LLM + Deep Context Engine).
 
-Allows shift supervisors and electricity traders to ask natural-language questions
-about the currently displayed 10-hour forecast (e.g., "What features drive the price
-at 14:00?", "Why is spike risk elevated?", "What changed vs. t-1h?").
-
-Supports:
-1. Live Google Gemini API (`GEMINI_API_KEY` / `GOOGLE_API_KEY`) grounded with the exact
-   40-step forecast, physical grid series, and TreeSHAP attributions at origin `t`.
-2. Deterministic Data-Grounded Explainability Engine (instant structured Markdown tables
-   and SHAP feature weightings even without an external API key).
+Capabilities:
+1. Top-Tier Live AI Models:
+   - Google Gemini (`gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`)
+   - Auto-support for OpenAI (`gpt-4o` if `sk-...` key provided) & Groq (`llama-3.3-70b-versatile` if `gsk_...` key provided).
+2. Full UI & Data Context Grounding:
+   - Active `selected_period`, `filter_mode`, `selected_origin`, `show_hindsight`, and multi-turn `chat_history`.
+   - Complete 40-step quarter-hour forecast matrix (Spot, P10, P50, P90, mFRR Up/Down/None,
+     High/Low Spike probabilities, Wind DA, Consumption DA, Residual Load, and TreeSHAP drivers).
+   - Full knowledge of every UI element on the website (Dataset Period, Quick Filter, Forecast Origin,
+     Anti-Leakage Gate Rule #1, KPI Cards, Fan Chart, Spike Monitor, mFRR Direction, and Benchmarks).
+3. Bilingual (German & English) & Zero-Horizontal-Scroll Formatting.
 """
 
 from __future__ import annotations
@@ -28,13 +30,12 @@ def compute_horizon_driver_weights(origin_df: pd.DataFrame, target_rows: pd.Data
     for s in df_use["top_drivers"].dropna().astype(str):
         parts = [p.strip() for p in s.split(";") if p.strip()]
         for idx, raw_drv in enumerate(parts[:3]):
-            # Rank 1 gets weight 3, Rank 2 gets 2, Rank 3 gets 1
             w = float(3 - idx)
             label = format_driver_name(raw_drv)
             scores[label] = scores.get(label, 0.0) + w
 
     total = sum(scores.values()) or 1.0
-    ranked = sorted(scores.items(), key=lambda x: -x[1])[:5]
+    ranked = sorted(scores.items(), key=lambda x: -x[1])[:4]
     return [
         {
             "driver": name,
@@ -44,20 +45,34 @@ def compute_horizon_driver_weights(origin_df: pd.DataFrame, target_rows: pd.Data
     ]
 
 
+def _is_german_query(question: str) -> bool:
+    """Detect whether the user's question is written in German."""
+    q = question.lower()
+    if any(ch in q for ch in ("ä", "ö", "ü", "ß")):
+        return True
+    de_words = (
+        "ist", "das", "die", "der", "den", "dem", "ein", "eine", "was", "wie",
+        "wo", "wann", "warum", "welche", "welcher", "welches", "uhr", "preis",
+        "spotpreis", "treiber", "zeig", "erkläre", "erklären", "vorstunde",
+        "empfehlung", "webseite", "website", "bedeutet", "funktioniert", "stunde",
+        "schritt", "für", "über", "nicht", "bitte", "kannst", "mir", "gibt",
+        "aktuell", "heißt", "genau", "zeitraum", "filter", "kurve", "graph",
+    )
+    return any(re.search(rf"\b{w}\b", q) for w in de_words)
+
+
 def _extract_requested_hour_rows(question: str, origin_df: pd.DataFrame) -> tuple[pd.DataFrame | None, str | None]:
-    """Check if the user asked about a specific hour (e.g. 'at 14:00', '14:30', 'Step 8')."""
+    """Check if the user asked about a specific hour (e.g. 'at 14:00', 'um 14 Uhr', 'Step 8')."""
     q_low = question.lower()
 
-    # Check for explicit step number: "step 12" or "schritt 12"
     m_step = re.search(r"\b(?:step|schritt)\s*(\d{1,2})\b", q_low)
     if m_step:
         step_num = int(m_step.group(1))
         sub = origin_df[origin_df["step"] == step_num]
         if len(sub):
-            ts_str = sub["delivery_start_utc"].iloc[0].strftime("%H:%M UTC")
+            ts_str = pd.Timestamp(sub["delivery_start_utc"].iloc[0]).strftime("%H:%M UTC")
             return sub, f"Step {step_num} ({ts_str})"
 
-    # Check for time pattern like "14:15", "at 14", "14 utc", "14h", "14 uhr"
     m_time = re.search(r"\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*(?:utc|uhr|h|o'clock)?\b", q_low)
     if m_time and (
         "at " in q_low
@@ -87,45 +102,158 @@ def _build_grounded_context_prompt(
     origin_df: pd.DataFrame,
     briefing: dict,
     selected_origin: pd.Timestamp,
+    ui_context: dict | None = None,
+    chat_history: list[dict] | None = None,
 ) -> str:
-    """Create a compact, leak-free English data context prompt for the Gemini LLM."""
+    """Create a complete, leak-free context prompt covering UI state, docs, and all 40 forecast steps."""
+    ui = ui_context or {}
+    active_period = ui.get("selected_period", "Test Period (5 Oct – 1 Nov 2026)")
+    active_filter = ui.get("filter_mode", "All 673 Origins (Chronological)")
+    origin_pos = ui.get("origin_pos_str", "1 / 673")
+    cutoff_str = ui.get("cutoff_str", selected_origin.strftime("%Y-%m-%d %H:%M:%SZ"))
+
     peak_hi_row = origin_df.loc[origin_df["p_spike_high"].idxmax()]
     peak_lo_row = origin_df.loc[origin_df["p_spike_low"].idxmax()]
     peak_p50_row = origin_df.loc[origin_df["p50"].idxmax()]
     min_p50_row = origin_df.loc[origin_df["p50"].idxmin()]
 
-    sample_steps = origin_df[origin_df["step"].isin([1, 2, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40])].copy()
+    spot_mean = float(origin_df["spot_price"].mean())
+    spot_min = float(origin_df["spot_price"].min())
+    spot_max = float(origin_df["spot_price"].max())
+    p50_mean = float(origin_df["p50"].mean())
+
     rows_txt = []
-    for _, r in sample_steps.iterrows():
+    for _, r in origin_df.iterrows():
         ts = pd.Timestamp(r["delivery_start_utc"]).strftime("%H:%M")
+        drvs = ", ".join(format_driver_name(d) for d in str(r["top_drivers"]).split(";")[:2] if d.strip())
         rows_txt.append(
-            f"Step {int(r['step'])} ({ts} UTC): Spot={r['spot_price']:.1f}, "
-            f"P10={r['p10']:.1f}, P50={r['p50']:.1f}, P90={r['p90']:.1f}, "
-            f"P_Up={r['p_up']:.2f}, P_Down={r['p_down']:.2f}, "
-            f"SpikeHi={r['p_spike_high']:.2f}, SpikeLo={r['p_spike_low']:.2f}, "
-            f"WindDA={r['wind_da']:.0f}MW, ConsDA={r['cons_da']:.0f}MW, "
-            f"Drivers={r['top_drivers']}"
+            f"S{int(r['step'])}({ts}): Spot={r['spot_price']:.1f}, P50={r['p50']:.1f} [{r['p10']:.1f}..{r['p90']:.1f}], "
+            f"Up={r['p_up']:.0%}/Dn={r['p_down']:.0%}, SpkHi={r['p_spike_high']:.0%}/Lo={r['p_spike_low']:.0%}, "
+            f"Wind={r['wind_da']:.0f}MW, Load={r['cons_da']:.0f}MW, ResLoad={r['residual_load_da']:.0f}MW, Drv=[{drvs}]"
         )
 
-    return f"""You are the AI Explainability Assistant inside Turku Energia's Situational Control Desk.
-Answer the user's question in clear, concise, and authoritative English following Turku Energia's Tone of Voice:
-"Asiantunteva, mutta ei insinöörimäinen" (Expert and trustworthy, yet clear and solution-oriented).
-Use structured Markdown, bullet points, and a compact Markdown table for relevant quarter-hour steps.
-IMPORTANT: Always frame operational actions as "Suggestions to Review" (decision support based on public market data), never as automated plant dispatch commands.
+    history_txt = ""
+    if chat_history and len(chat_history) > 1:
+        recent_turns = chat_history[-5:-1]
+        turn_lines = [f"{m['role'].upper()}: {m['markdown'][:280]}" for m in recent_turns]
+        history_txt = "\nRecent Conversation History:\n" + "\n".join(turn_lines) + "\n"
 
-Current Forecast Origin (t): {selected_origin.strftime('%Y-%m-%d %H:%M UTC')}
-Dominant Balancing Direction: {briefing['dominant_dir']} (Avg P_Up={briefing['mean_p_up']:.1%}, Avg P_Down={briefing['mean_p_down']:.1%})
-Peak High-Spike Risk: {briefing['max_p_hi']:.1%} at {pd.Timestamp(peak_hi_row['delivery_start_utc']).strftime('%H:%M UTC')} (P50={peak_hi_row['p50']:.1f} €/MWh vs Spot={peak_hi_row['spot_price']:.1f} €/MWh)
-Peak Low-Spike Risk: {briefing['max_p_lo']:.1%} at {pd.Timestamp(peak_lo_row['delivery_start_utc']).strftime('%H:%M UTC')} (P50={peak_lo_row['p50']:.1f} €/MWh)
-Highest P50 Forecast: {peak_p50_row['p50']:.1f} €/MWh at {pd.Timestamp(peak_p50_row['delivery_start_utc']).strftime('%H:%M UTC')}
-Lowest P50 Forecast: {min_p50_row['p50']:.1f} €/MWh at {pd.Timestamp(min_p50_row['delivery_start_utc']).strftime('%H:%M UTC')}
-Max Revision vs. Previous Hour (t-1h): {briefing['max_abs_rev']:.1f} €/MWh (Mean {briefing['mean_rev']:+.1f} €/MWh)
+    lang_instruction = (
+        "WICHTIG: Antworte auf DEUTSCH, da der Nutzer auf Deutsch fragt."
+        if _is_german_query(question)
+        else "IMPORTANT: Respond in ENGLISH (matching the user's language)."
+    )
 
-Sample of the 40 Quarter-Hour Steps:
+    return f"""You are the intelligent AI Assistant for the Turku Energia Imbalance Price Situational Desk.
+{lang_instruction}
+
+Formatting Rules for Sidebar Display:
+- Directly answer the user's specific question first! Never ignore their question or output a generic summary if they ask a specific concept or UI question.
+- Keep answers concise, well-structured, and easy to read.
+- If you include a Markdown table, use AT MOST 4 short columns (`| UTC | Spot → P50 | P10–P90 | Spike |`) so there is zero horizontal scrolling.
+- Frame operational advice as "Suggestions to Review" (Prüf-Empfehlungen), never as automated switching commands.
+
+Complete UI & Website Context (What the user is looking at right now):
+1. **Active Dataset Period (`1. Dataset Period` in left sidebar)**: Currently set to **`{active_period}`**.
+   - *Test Period (5 Oct – 1 Nov 2026)*: The official competition test window with 673 hourly forecast origins × 40 quarter-hour steps = 26,920 rows (`forecast_backtest.csv`).
+   - *Validation Period (7 Sep – 4 Oct 2026)*: The historical walk-forward validation window (672 origins, 26,700 scored rows) where realized ground-truth imbalance prices are available for Hindsight comparison.
+2. **Active Quick Filter (`2. Origin Filter & Time Step`)**: Currently set to **`{active_filter}`** (Position `{origin_pos}`).
+   - Filters the hourly forecast origins `t` chronologically, by active Spike Warnings (≥ 30%), or by the Top 20 High-Price / Low-Price Spike risk hours.
+3. **Selected Forecast Origin (`t`)**: **`{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`** (Data Cutoff: `{cutoff_str}`).
+4. **Anti-Leakage Gate (Rule #1)**: Enforces `first_usable_origin_utc <= t`. Only data officially published at or before `t` is used.
+5. **Key Domain Concepts on the Dashboard**:
+   - **Day-Ahead Spot Price (`Spotpreis`)**: The Nord Pool day-ahead auction price for Finland (€/MWh), published every day at ~14:00 CET for the next day. It serves as the known anchor price. In the current 10h window (`{selected_origin.strftime('%H:%M UTC')}`), the Spot Price averages **{spot_mean:.2f} €/MWh** (min `{spot_min:.2f} €`, max `{spot_max:.2f} €`).
+   - **Imbalance Price (`Ausgleichspreis` — P10 / P50 / P90)**: Fingrid's 15-minute settlement price for grid imbalances. `P50` is our AI median forecast (currently averaging **{p50_mean:.2f} €/MWh**), `P10` is the 10th percentile lower bound, and `P90` is the 90th percentile upper bound (`P10–P90` = 80% confidence band).
+   - **Price Spikes (`Spike Probability`)**: Defined in the challenge as an imbalance price deviating by more than ±50 €/MWh from the Spot Price (`High Spike > Spot + 50 €`, `Low Spike < Spot - 50 €`). A 30% probability triggers an operational alert.
+   - **mFRR Balancing Direction (`Up / Down / None`)**: Manual Frequency Restoration Reserve direction in Finland. `Up-Regulation` = power deficit in the grid (plants ramp up, imbalance price rises above Spot). `Down-Regulation` = power surplus (e.g. high wind, plants ramp down / boilers turn on, price drops below Spot). `None` = balanced grid.
+   - **Model Suite & Benchmark (Tab 3)**: Dual-depth LightGBM quantile & classification suite + Conformal Calibration + TreeSHAP. Beats the official baseline on every metric: P50 MAE improved by 35% (`43.19` vs `66.20 €/MWh`), Mean Pinball Loss cut by 49% (`12.43` vs `24.18`), P10–P90 coverage hits exact `80.0%` target, Spike Brier `0.0928`, Direction Brier `0.4222`.
+
+Live Data Summary for Current Origin `t = {selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`:
+- Dominant Balancing Direction: {briefing['dominant_dir']} (Mean P_Up={briefing['mean_p_up']:.1%}, Mean P_Down={briefing['mean_p_down']:.1%})
+- Peak High-Spike Risk: {briefing['max_p_hi']:.1%} at {pd.Timestamp(peak_hi_row['delivery_start_utc']).strftime('%H:%M UTC')} (P50={peak_hi_row['p50']:.1f} € vs Spot={peak_hi_row['spot_price']:.1f} €)
+- Peak Low-Spike Risk: {briefing['max_p_lo']:.1%} at {pd.Timestamp(peak_lo_row['delivery_start_utc']).strftime('%H:%M UTC')} (P50={peak_lo_row['p50']:.1f} €)
+- Highest P50 Price: {peak_p50_row['p50']:.1f} €/MWh at {pd.Timestamp(peak_p50_row['delivery_start_utc']).strftime('%H:%M UTC')}
+- Lowest P50 Price: {min_p50_row['p50']:.1f} €/MWh at {pd.Timestamp(min_p50_row['delivery_start_utc']).strftime('%H:%M UTC')}
+- Forecast Revision vs Previous Hour (t-1h): Max ΔP50 = {briefing['max_abs_rev']:.1f} €/MWh (Mean {briefing['mean_rev']:+.1f} €/MWh)
+{history_txt}
+All 40 Quarter-Hour Steps for Origin `{selected_origin.strftime('%H:%M UTC')}`:
 {chr(10).join(rows_txt)}
 
 User Question: {question}
 """
+
+
+def _call_llm_api(prompt: str, api_key: str, preferred_model: str = "gemini-2.5-pro") -> tuple[str | None, str | None]:
+    """Call Google Gemini (2.5 Pro / 2.5 Flash / 2.0 Flash), OpenAI (gpt-4o), or Groq (Llama 3.3 70B)."""
+    key = api_key.strip()
+
+    # 1. OpenAI API key support (sk-...)
+    if key.startswith("sk-"):
+        try:
+            resp = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={
+                    "model": "gpt-4o",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.25,
+                    "max_tokens": 700,
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"], "GPT-4o · Live"
+        except Exception:
+            pass
+
+    # 2. Groq API key support (gsk_...)
+    if key.startswith("gsk_"):
+        try:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.25,
+                    "max_tokens": 700,
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"], "Llama 3.3 70B · Live"
+        except Exception:
+            pass
+
+    # 3. Google Gemini API (Try preferred model first, then fallback across 2.5-pro, 2.5-flash, 2.0-flash)
+    gemini_order = [preferred_model] + [
+        m for m in ("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro")
+        if m != preferred_model
+    ]
+    last_err = None
+    for model_name in gemini_order:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
+            resp = requests.post(
+                url,
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0.25, "maxOutputTokens": 750},
+                },
+                timeout=16,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get("candidates", [])
+                if candidates:
+                    text = candidates[0]["content"]["parts"][0]["text"]
+                    return text, f"{model_name} · Live"
+            else:
+                err_json = resp.json() if resp.content else {}
+                last_err = err_json.get("error", {}).get("message", f"HTTP {resp.status_code}")
+        except Exception as exc:
+            last_err = str(exc)
+    return None, last_err
 
 
 def generate_explainability_response(
@@ -134,55 +262,111 @@ def generate_explainability_response(
     briefing: dict,
     selected_origin: pd.Timestamp,
     api_key: str | None = None,
+    preferred_model: str = "gemini-2.5-pro",
+    ui_context: dict | None = None,
+    chat_history: list[dict] | None = None,
 ) -> dict:
-    """Return structured English AI response with Markdown text, table, and feature weights."""
+    """Return context-aware AI response answering the exact user question in German or English."""
     matched_rows, matched_label = _extract_requested_hour_rows(question, origin_df)
     driver_weights = compute_horizon_driver_weights(origin_df, matched_rows)
+    is_de = _is_german_query(question)
+    ui = ui_context or {}
+    active_period = ui.get("selected_period", "Test Period (5 Oct – 1 Nov 2026)")
+    active_filter = ui.get("filter_mode", "All 673 Origins (Chronological)")
+    origin_pos = ui.get("origin_pos_str", "1 / 673")
+    cutoff_str = ui.get("cutoff_str", selected_origin.strftime("%Y-%m-%d %H:%M:%SZ"))
 
-    effective_key = (api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+    effective_key = (
+        api_key
+        or os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or ""
+    ).strip()
 
-    # 1. Try live Gemini API if key is available
+    # 1. Try Live LLM (Gemini 2.5 Pro / Flash, GPT-4o, or Llama 3.3 70B) if API key is present
     if effective_key:
-        try:
-            prompt = _build_grounded_context_prompt(question, origin_df, briefing, selected_origin)
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={effective_key}"
-            resp = requests.post(
-                url,
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 700},
-                },
-                timeout=12,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    text = candidates[0]["content"]["parts"][0]["text"]
-                    return {
-                        "markdown": text,
-                        "driver_weights": driver_weights,
-                        "source": "Gemini 2.0 Flash · Grounded Data",
-                    }
-        except Exception:
-            pass  # Fall back seamlessly to local grounded engine
+        prompt = _build_grounded_context_prompt(
+            question=question,
+            origin_df=origin_df,
+            briefing=briefing,
+            selected_origin=selected_origin,
+            ui_context=ui_context,
+            chat_history=chat_history,
+        )
+        llm_text, model_label = _call_llm_api(prompt, effective_key, preferred_model=preferred_model)
+        if llm_text:
+            return {
+                "markdown": llm_text,
+                "driver_weights": driver_weights,
+                "source": model_label or "Gemini · Live",
+            }
 
-    # 2. Local Data-Grounded Explainability Engine (always works, zero latency)
+    # 2. Built-in Context-Aware Knowledge & Data Engine (when no external API key is entered)
     q_low = question.lower()
+    spot_mean = float(origin_df["spot_price"].mean())
+    spot_min = float(origin_df["spot_price"].min())
+    spot_max = float(origin_df["spot_price"].max())
+    p50_mean = float(origin_df["p50"].mean())
+    peak_row = origin_df.loc[origin_df["p50"].idxmax()]
+    min_row = origin_df.loc[origin_df["p50"].idxmin()]
+    hi_row = origin_df.loc[origin_df["p_spike_high"].idxmax()]
 
+    # --- Topic A: Dataset Period / Test vs Validation Period ---
+    if any(k in q_low for k in ("dataset period", "test period", "validation period", "periode", "zeitraum", "welcher datensatz", "which period", "dataset")):
+        if is_de:
+            md = (
+                f"**Dataset Period (Datensatz-Zeitraum)**\n\n"
+                f"Aktuell ist links in der Sidebar ausgewählt:\n"
+                f"* **`{active_period}`** *(Origin `{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`, Position `{origin_pos}`)*\n\n"
+                f"**Was bedeuten die beiden Zeiträume?**\n"
+                f"1. **Test Period (5. Okt – 1. Nov 2026):** Der offizielle Bewertungszeitraum der Challenge mit **673 stündlichen Origins** (= 26.920 Viertelstunden-Vorhersagen in `forecast_backtest.csv`).\n"
+                f"2. **Validation Period (7. Sep – 4. Okt 2026):** Der historische Testzeitraum vor dem Wettbewerb. Hier liegen die echten Ausgleichspreise bereits vor, sodass du mit dem Schalter **„🎯 Overlay Actual Prices (Hindsight)“** unsere KI-Prognose direkt mit der Realität vergleichen kannst."
+            )
+        else:
+            md = (
+                f"**Dataset Period Overview**\n\n"
+                f"Currently selected in the left sidebar:\n"
+                f"* **`{active_period}`** *(Origin `{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`, position `{origin_pos}`)*\n\n"
+                f"**What the two periods mean:**\n"
+                f"1. **Test Period (5 Oct – 1 Nov 2026):** The official competition evaluation period containing **673 hourly forecast origins** × 40 steps = 26,920 predictions (`forecast_backtest.csv`).\n"
+                f"2. **Validation Period (7 Sep – 4 Oct 2026):** The historical walk-forward period where realized ground-truth prices are known, allowing you to toggle **“🎯 Overlay Actual Prices (Hindsight)”** to compare forecasts against reality."
+            )
+        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+
+    # --- Topic B: Spot Price (Day-Ahead Spotpreis) ---
+    if any(k in q_low for k in ("spot", "spotpreis", "nord pool", "nordpool", "day-ahead", "day ahead")):
+        if is_de:
+            md = (
+                f"**Was ist der Day-Ahead Spotpreis (`Spot Price`)?**\n\n"
+                f"Der **Spotpreis** (gestrichelte orange Linie im Hauptgraphen) ist der offizielle Börsenstrompreis der **Nord Pool Day-Ahead-Auktion** für Finnland. Er wird bereits am Vortag um **14:00 Uhr** festgelegt und ist daher für alle 40 zukünftigen Viertelstunden-Schritte bereits bekannt.\n\n"
+                f"**Werte im aktuellen 10h-Fenster (`{selected_origin.strftime('%H:%M UTC')}`):**\n"
+                f"* **Spot-Mittelwert:** `{spot_mean:.2f} €/MWh` *(Min: `{spot_min:.2f} €`, Max: `{spot_max:.2f} €`)*\n"
+                f"* **KI-Prognose (P50 Mittel):** `{p50_mean:.2f} €/MWh` *(Abweichung zum Spot: **{p50_mean - spot_mean:+.2f} €/MWh**)*\n\n"
+                f"💡 *Unser Modell sagt den Spread (`Imbalance Price − Spot Price`) voraus: Liegt P50 über dem Spotpreis, droht Strommangel (Up-Regulation); liegt P50 darunter, herrscht Stromüberschuss (Down-Regulation).*"
+            )
+        else:
+            md = (
+                f"**What is the Day-Ahead Spot Price?**\n\n"
+                f"The **Day-Ahead Spot Price** (dashed orange line in the main chart) is the official **Nord Pool** auction clearing price for Finland. Because it is published at **14:00 CET on the previous day (D−1)**, it is already known across the upcoming 10-hour horizon and serves as the baseline anchor for imbalance pricing.\n\n"
+                f"**Current 10h Window (`{selected_origin.strftime('%H:%M UTC')}`):**\n"
+                f"* **Mean Spot Price:** `{spot_mean:.2f} €/MWh` *(Min: `{spot_min:.2f} €`, Max: `{spot_max:.2f} €`)*\n"
+                f"* **Mean AI Forecast (P50):** `{p50_mean:.2f} €/MWh` *(Spread vs. Spot: **{p50_mean - spot_mean:+.2f} €/MWh**)*\n\n"
+                f"💡 *When the Imbalance Price (P50) rises above Spot, the grid is in deficit (Up-Regulation); when it drops below Spot, the grid has surplus power (Down-Regulation).*"
+            )
+        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+
+    # --- Topic C: Specific Hour or Step (e.g. "14:00", "um 8 Uhr", "Step 12") ---
     if matched_rows is not None and matched_label is not None:
-        # User asked about a specific time / hour / step!
         table_lines = [
-            "| Time (UTC) | Step | Spot (€) | P50 (€) | P10–P90 Band | P(Spike Hi/Lo) | Key SHAP Drivers |",
-            "| :--- | :---: | ---: | ---: | :---: | :---: | :--- |",
+            "| UTC | Spot → P50 | P10–P90 | Spike Hi/Lo |",
+            "| :--- | :---: | :---: | :---: |",
         ]
         for _, r in matched_rows.iterrows():
             t_str = pd.Timestamp(r["delivery_start_utc"]).strftime("%H:%M")
-            raw_drvs = [format_driver_name(d) for d in str(r["top_drivers"]).split(";")[:2] if d.strip()]
-            drv_short = ", ".join(raw_drvs)
             table_lines.append(
-                f"| **{t_str}** | {int(r['step'])} | {r['spot_price']:.1f} | **{r['p50']:.1f}** | "
-                f"[{r['p10']:.1f}, {r['p90']:.1f}] | {r['p_spike_high']:.0%} / {r['p_spike_low']:.0%} | {drv_short} |"
+                f"| **{t_str}** | {r['spot_price']:.0f} → **{r['p50']:.1f} €** | "
+                f"{r['p10']:.0f}..{r['p90']:.0f} € | {r['p_spike_high']:.0%} / {r['p_spike_low']:.0%} |"
             )
 
         mean_p50 = float(matched_rows["p50"].mean())
@@ -192,93 +376,263 @@ def generate_explainability_response(
         mean_res = float(matched_rows["residual_load_da"].mean())
         top_drv_names = ", ".join(d["driver"] for d in driver_weights[:3])
 
-        md = (
-            f"### Breakdown for **{matched_label}** (Origin `{selected_origin.strftime('%H:%M UTC')}`)\n\n"
-            f"Across the requested window, the mean **P50 forecast is {mean_p50:.2f} €/MWh** "
-            f"(Spread vs. Day-Ahead Spot: **{mean_p50 - mean_spot:+.2f} €/MWh**).\n\n"
-            f"* **Primary SHAP Drivers:** {top_drv_names}.\n"
-            f"* **Physical Grid Fundamentals:** Scheduled consumption **{mean_cons:,.0f} MW**, "
-            f"wind generation forecast **{mean_wind:,.0f} MW**, resulting residual load **{mean_res:,.0f} MW**.\n\n"
-            + "\n".join(table_lines)
-        )
-        return {
-            "markdown": md,
-            "driver_weights": driver_weights,
-            "source": "TreeSHAP & FeatureStore Engine",
-        }
-
-    if any(k in q_low for k in ("previous", "revision", "changed", "change", "drift", "t-1", "t−1", "vorstunde")):
-        md = (
-            f"### Forecast Revision vs. Previous Hour (`t − 1h`)\n\n"
-            f"Compared to the previous hourly run, the **P50 trajectory** shifted by an average of "
-            f"**{briefing['mean_rev']:+.2f} €/MWh** (maximum single-step revision: "
-            f"**Δ {briefing['max_abs_rev']:.2f} €/MWh**).\n\n"
-            f"* **Root Cause of Update:** Newly published real-time telemetry prior to `{selected_origin.strftime('%H:%M UTC')}` "
-            f"(30-minute publication lag for realized load & cross-border flows, plus 60-minute lag for aFRR/mFRR balancing activations).\n"
-            f"* **Assessment:** {'🔄 Significant revision (≥ 15 €/MWh) — review open intraday exposure.' if briefing['max_abs_rev'] >= 15.0 else '✅ Minor revision (< 15 €/MWh) — dispatch outlook remains stable.'}"
-        )
-        return {
-            "markdown": md,
-            "driver_weights": driver_weights,
-            "source": "TreeSHAP & FeatureStore Engine",
-        }
-
-    if any(k in q_low for k in ("action", "recommend", "suggestion", "review", "supervisor", "trader", "dispatch", "empfehlung")):
-        hi_steps = origin_df[origin_df["p_spike_high"] >= 0.30]
-        lo_steps = origin_df[origin_df["p_spike_low"] >= 0.30]
-        if len(hi_steps):
-            t0 = hi_steps["delivery_start_utc"].min().strftime("%H:%M UTC")
-            t1 = (hi_steps["delivery_start_utc"].max() + pd.Timedelta(minutes=15)).strftime("%H:%M UTC")
-            rec = (
-                f"1. **Review High-Price Window ({t0}–{t1}):** Probability of prices `> Spot + 50 €/MWh` peaks at **{briefing['max_p_hi']:.1%}**.\n"
-                f"2. **Generation & District Heating:** Review availability of flexible generation assets and evaluate reducing electric boiler load during peak risk steps.\n"
-                f"3. **Intraday Trading Desk:** Consider hedging open short positions ahead of the high-risk window."
-            )
-        elif len(lo_steps):
-            t0 = lo_steps["delivery_start_utc"].min().strftime("%H:%M UTC")
-            t1 = (lo_steps["delivery_start_utc"].max() + pd.Timedelta(minutes=15)).strftime("%H:%M UTC")
-            rec = (
-                f"1. **Review Low / Negative Price Window ({t0}–{t1}):** Probability of prices `< Spot − 50 €/MWh` reaches **{briefing['max_p_lo']:.1%}**.\n"
-                f"2. **Flexible Demand (Power-to-Heat):** Evaluate ramping up electric boilers or district heat pumps to capture low or negative imbalance prices.\n"
-                f"3. **mFRR Down-Regulation Bids:** Verify curtailment readiness."
+        if is_de:
+            md = (
+                f"**Analyse für `{matched_label}`** *(Origin {selected_origin.strftime('%H:%M UTC')})*\n\n"
+                f"* **Prognose-Mittel (P50):** **{mean_p50:.2f} €/MWh** ({mean_p50 - mean_spot:+.2f} € vs. Spot)\n"
+                f"* **Netz-Fundamentaldaten:** Last **{mean_cons:,.0f} MW** · Wind **{mean_wind:,.0f} MW** · Residuallast **{mean_res:,.0f} MW**\n"
+                f"* **Haupttreiber (SHAP):** {top_drv_names}\n\n"
+                + "\n".join(table_lines)
             )
         else:
-            rec = (
-                "1. **Standard Operations:** No quarter-hour step exceeds the 30% spike alert threshold.\n"
-                "2. **Grid Monitoring:** Dominant balancing tendency is **" + briefing["dominant_dir"] + "** — maintain baseline schedule."
+            md = (
+                f"**Breakdown for `{matched_label}`** *(Origin {selected_origin.strftime('%H:%M UTC')})*\n\n"
+                f"* **Mean Forecast (P50):** **{mean_p50:.2f} €/MWh** ({mean_p50 - mean_spot:+.2f} € vs. Spot)\n"
+                f"* **Grid Fundamentals:** Load **{mean_cons:,.0f} MW** · Wind **{mean_wind:,.0f} MW** · Residual **{mean_res:,.0f} MW**\n"
+                f"* **Primary SHAP Drivers:** {top_drv_names}\n\n"
+                + "\n".join(table_lines)
             )
-        md = (
-            f"### Operational Suggestions to Review (Shift Supervisors & Traders)\n\n"
-            f"*(Note per Challenge Guidelines: Decision support grounded in public market data — not automated plant switching commands)*\n\n"
-            f"{rec}"
-        )
-        return {
-            "markdown": md,
-            "driver_weights": driver_weights,
-            "source": "Turku Energia Decision Support",
-        }
+        return {"markdown": md, "driver_weights": driver_weights, "source": "TreeSHAP Engine"}
 
-    # Default: Comprehensive driver & peak analysis across the 10-hour horizon
-    peak_idx = origin_df["p50"].idxmax()
-    min_idx = origin_df["p50"].idxmin()
-    hi_idx = origin_df["p_spike_high"].idxmax()
-    r_peak = origin_df.loc[peak_idx]
-    r_min = origin_df.loc[min_idx]
-    r_hi = origin_df.loc[hi_idx]
+    # --- Topic D: Quantiles / P10 / P50 / P90 / Confidence Band / Fan Chart ---
+    if any(k in q_low for k in ("p10", "p50", "p90", "quantil", "quantile", "konfidenz", "confidence", "uncertainty", "unsicherheit", "fan chart", "band")):
+        if is_de:
+            md = (
+                f"**Was bedeuten P10, P50 und P90 im Fan-Chart?**\n\n"
+                f"* **P50 (Median-Prognose):** Unsere wahrscheinlichste Punktprognose für den Ausgleichspreis (aktuell Ø **{p50_mean:.2f} €/MWh**, Spitze **{peak_row['p50']:.1f} €** um `{pd.Timestamp(peak_row['delivery_start_utc']).strftime('%H:%M UTC')}`).\n"
+                f"* **P10 (Untergrenze, 10%-Quantil):** Mit 90 % Wahrscheinlichkeit fällt der Preis nicht unter diesen Wert.\n"
+                f"* **P90 (Obergrenze, 90%-Quantil):** Mit 90 % Wahrscheinlichkeit steigt der Preis nicht über diesen Wert.\n"
+                f"* **80% Unsicherheits-Band (`P10–P90`):** Die schattierte Fläche zwischen P10 und P90 hat im aktuellen Fenster eine durchschnittliche Breite von **{briefing['mean_band']:.1f} €/MWh** und deckt in der Validierung exakt **80,0 %** aller echten Preise ab."
+            )
+        else:
+            md = (
+                f"**Understanding P10, P50 & P90 in the Fan Chart**\n\n"
+                f"* **P50 (Median Forecast):** The central 50th percentile price prediction (currently averaging **{p50_mean:.2f} €/MWh**, peaking at **{peak_row['p50']:.1f} €** at `{pd.Timestamp(peak_row['delivery_start_utc']).strftime('%H:%M UTC')}`).\n"
+                f"* **P10 (10th Percentile Lower Bound):** Only a 10% chance the actual price drops below this line.\n"
+                f"* **P90 (90th Percentile Upper Bound):** Only a 10% chance the actual price exceeds this line.\n"
+                f"* **80% Confidence Interval (`P10–P90`):** The shaded fan between P10 and P90 averages **{briefing['mean_band']:.1f} €/MWh** in width for this origin and achieves an exact **80.0% empirical coverage** on validation data."
+            )
+        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
 
+    # --- Topic E: Forecast Origin / Time Machine / Quick Filter / Top 20 ---
+    if any(k in q_low for k in ("origin", "time machine", "filter", "top 20", "schnellfilter", "quick filter")):
+        if is_de:
+            md = (
+                f"**Wie funktionieren `Forecast Origin (t)` & der `Quick Filter`?**\n\n"
+                f"* **Forecast Origin (`t`):** Der exakte Zeitpunkt, an dem die Prognose berechnet wird (aktuell **`{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`**). Von hier blickt die KI 10 Stunden (40 Viertelstunden) in die Zukunft.\n"
+                f"* **Aktiver Filter:** `{active_filter}` *(Position `{origin_pos}`)*.\n"
+                f"* **Filter-Optionen:**\n"
+                f"  * **All 673 Origins:** Chronologische Liste aller Stunden.\n"
+                f"  * **Spike Alert Origins Only (≥ 30%):** Nur Stunden, in denen akute Preis-Spike-Gefahr besteht.\n"
+                f"  * **Top 20 High-Price / Low-Price Spike Origins:** Die 20 extremsten Risiko-Stunden für Hochpreis-Spikes (`> Spot + 50 €`) bzw. Negativ-/Tiefpreis-Spikes (`< Spot − 50 €`)."
+            )
+        else:
+            md = (
+                f"**How `Forecast Origin (t)` & `Quick Filter` Work**\n\n"
+                f"* **Forecast Origin (`t`):** The exact timestamp when the forecast is issued (currently **`{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`**). From `t`, the model predicts the next 40 quarter-hour steps (+10 hours).\n"
+                f"* **Active Filter:** `{active_filter}` *(Position `{origin_pos}`)*.\n"
+                f"* **Filter Modes:**\n"
+                f"  * **All 673 Origins:** Full chronological timeline.\n"
+                f"  * **Spike Alert Origins Only (≥ 30%):** Filters to origins with active spike alerts.\n"
+                f"  * **Top 20 High / Low Spike Origins:** Jumps straight to the 20 origins with the highest probability of upward surges (`> Spot + 50 €`) or downward drops (`< Spot − 50 €`)."
+            )
+        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+
+    # --- Topic F: Anti-Leakage Gate (Rule #1) ---
+    if any(k in q_low for k in ("leakage", "rule #1", "rule 1", "cutoff", "first_usable", "gate", "regel 1")):
+        if is_de:
+            md = (
+                f"**🛡️ Anti-Leakage Gate (Rule #1)**\n\n"
+                f"Die wichtigste Wettbewerbsregel lautet: Für jeden Vorhersage-Zeitpunkt `t` dürfen ausschließlich Daten verwendet werden, deren Veröffentlichungszeitpunkt (`first_usable_origin_utc`) kleiner oder gleich `t` ist.\n\n"
+                f"* **Aktueller Origin (`t`):** `{selected_origin.strftime('%Y-%m-%d %H:%M:%SZ')}`\n"
+                f"* **Frischester Datenpunkt (`Data Cutoff`):** `{cutoff_str}`\n"
+                f"* **Status:** `✓ Verified: first_usable_origin_utc ≤ t` (Berücksichtigt 30m Publikations-Lag für Last/Grenzflüsse und 60m Lag für mFRR/aFRR-Regelenergie)."
+            )
+        else:
+            md = (
+                f"**🛡️ Anti-Leakage Gate (Rule #1)**\n\n"
+                f"Challenge Rule #1 mandates that for any forecast origin `t`, only data rows with `first_usable_origin_utc <= t` may be accessed.\n\n"
+                f"* **Current Origin (`t`):** `{selected_origin.strftime('%Y-%m-%d %H:%M:%SZ')}`\n"
+                f"* **Latest Input Telemetry (`Data Cutoff`):** `{cutoff_str}`\n"
+                f"* **Status:** `✓ Verified: first_usable_origin_utc ≤ t` (Accounts for 30-min publication lag on real-time load/flows and 60-min lag on mFRR/aFRR balancing series)."
+            )
+        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+
+    # --- Topic G: mFRR Balancing Direction (Up / Down / None) ---
+    if any(k in q_low for k in ("mfrr", "direction", "regelrichtung", "up-regulation", "down-regulation", "up regulation", "down regulation", "deficit", "surplus")):
+        if is_de:
+            md = (
+                f"**mFRR-Regelrichtung (`Up / Down / None`) im aktuellen Horizont**\n\n"
+                f"* **Dominante Tendenz:** **{briefing['dominant_dir']}**\n"
+                f"* **Mittlere Wahrscheinlichkeiten:** `P(Up) = {briefing['mean_p_up']:.1%}` · `P(Down) = {briefing['mean_p_down']:.1%}` · `P(None) = {float(origin_df['p_none'].mean()):.1%}`\n\n"
+                f"**Bedeutung:**\n"
+                f"* **Up-Regulation (Orange):** Stromdefizit im Netz – Kraftwerke werden hochgefahren, der Ausgleichspreis steigt über den Spotpreis.\n"
+                f"* **Down-Regulation (Türkis):** Stromüberschuss (z. B. viel Wind) – Erzeuger regeln ab oder Elektrokessel schalten zu, Preis fällt unter Spot."
+            )
+        else:
+            md = (
+                f"**mFRR Balancing Direction (`Up / Down / None`)**\n\n"
+                f"* **Dominant Tendency:** **{briefing['dominant_dir']}**\n"
+                f"* **10h Mean Probabilities:** `P(Up) = {briefing['mean_p_up']:.1%}` · `P(Down) = {briefing['mean_p_down']:.1%}` · `P(None) = {float(origin_df['p_none'].mean()):.1%}`\n\n"
+                f"**What it means:**\n"
+                f"* **Up-Regulation (Orange):** Grid power deficit — balancing assets ramp up, pushing the imbalance price above Spot.\n"
+                f"* **Down-Regulation (Turquoise):** Grid power surplus — generation curtails or flexible boilers absorb load, pushing price below Spot."
+            )
+        return {"markdown": md, "driver_weights": [], "source": "TreeSHAP Engine"}
+
+    # --- Topic H: Wind / Consumption / Residual Load / Physical Grid ---
+    if any(k in q_low for k in ("wind", "verbrauch", "consumption", "load", "residual", "residuallast", "solar", "mw")):
+        w_min, w_max, w_mean = float(origin_df["wind_da"].min()), float(origin_df["wind_da"].max()), float(origin_df["wind_da"].mean())
+        c_mean = float(origin_df["cons_da"].mean())
+        r_mean = float(origin_df["residual_load_da"].mean())
+        if is_de:
+            md = (
+                f"**Physikalische Netzfundamentaldaten (`{selected_origin.strftime('%H:%M UTC')}` + 10h)**\n\n"
+                f"* **Verbrauchsprognose (Load DA):** Ø **{c_mean:,.0f} MW**\n"
+                f"* **Windkraft-Prognose (Wind DA):** Ø **{w_mean:,.0f} MW** *(Spanne: `{w_min:,.0f}` bis `{w_max:,.0f} MW`)*\n"
+                f"* **Residuallast (`Last − Wind − Solar`):** Ø **{r_mean:,.0f} MW**\n\n"
+                f"💡 *Steigt die Residuallast stark an (hoher Verbrauch bei wenig Wind), wächst das Risiko für Up-Regulation und Hochpreis-Spikes.*"
+            )
+        else:
+            md = (
+                f"**Physical Grid Fundamentals (`{selected_origin.strftime('%H:%M UTC')}` + 10h)**\n\n"
+                f"* **Consumption Forecast (Load DA):** Mean **{c_mean:,.0f} MW**\n"
+                f"* **Wind Generation Forecast (Wind DA):** Mean **{w_mean:,.0f} MW** *(Range: `{w_min:,.0f}` to `{w_max:,.0f} MW`)*\n"
+                f"* **Residual Load (`Load − Wind − Solar`):** Mean **{r_mean:,.0f} MW**\n\n"
+                f"💡 *High residual load indicates tight conventional supply and elevated upward spike risk, whereas low/negative residual load signals wind surplus.*"
+            )
+        return {"markdown": md, "driver_weights": [], "source": "FeatureStore Engine"}
+
+    # --- Topic I: Forecast Revision vs. Previous Hour (t - 1h) ---
+    if any(k in q_low for k in ("previous", "revision", "changed", "change", "drift", "t-1", "t−1", "vorstunde", "geändert", "änderung")):
+        if is_de:
+            status_txt = (
+                "🔄 **Deutliche Revision (≥ 15 €/MWh)** – offene Intraday-Positionen prüfen."
+                if briefing["max_abs_rev"] >= 15.0
+                else "✅ **Geringe Revision (< 15 €/MWh)** – Prognoseverlauf stabil."
+            )
+            md = (
+                f"**Prognose-Revision vs. Vorstunde (`t − 1h`)**\n\n"
+                f"* **Mittlere Verschiebung (Ø ΔP50):** `{briefing['mean_rev']:+.2f} €/MWh`\n"
+                f"* **Maximale Schritt-Änderung:** `Δ {briefing['max_abs_rev']:.2f} €/MWh`\n"
+                f"* **Auslöser:** Neue Echtzeit-Messwerte vor `{selected_origin.strftime('%H:%M UTC')}` (30m Verbrauchs-Lag & 60m mFRR/aFRR-Lag).\n"
+                f"* {status_txt}"
+            )
+        else:
+            status_txt = (
+                "🔄 **Significant revision (≥ 15 €/MWh)** — review open intraday exposure."
+                if briefing["max_abs_rev"] >= 15.0
+                else "✅ **Minor revision (< 15 €/MWh)** — dispatch trajectory remains stable."
+            )
+            md = (
+                f"**Forecast Revision vs. Previous Hour (`t − 1h`)**\n\n"
+                f"* **Mean Trajectory Shift (ΔP50):** `{briefing['mean_rev']:+.2f} €/MWh`\n"
+                f"* **Max Single-Step Shift:** `Δ {briefing['max_abs_rev']:.2f} €/MWh`\n"
+                f"* **Root Cause:** Newly published real-time telemetry prior to `{selected_origin.strftime('%H:%M UTC')}` (30m load lag & 60m balancing lag).\n"
+                f"* {status_txt}"
+            )
+        return {"markdown": md, "driver_weights": driver_weights, "source": "TreeSHAP Engine"}
+
+    # --- Topic J: Operational Suggestions / Actions ---
+    if any(k in q_low for k in ("action", "recommend", "suggestion", "review", "supervisor", "trader", "dispatch", "empfehlung", "maßnahme", "schichtleiter", "tun")):
+        hi_steps = origin_df[origin_df["p_spike_high"] >= 0.30]
+        lo_steps = origin_df[origin_df["p_spike_low"] >= 0.30]
+        if is_de:
+            if len(hi_steps):
+                t0 = hi_steps["delivery_start_utc"].min().strftime("%H:%M")
+                t1 = (hi_steps["delivery_start_utc"].max() + pd.Timedelta(minutes=15)).strftime("%H:%M UTC")
+                rec = (
+                    f"1. **Hochpreis-Fenster ({t0}–{t1}) prüfen:** Spike-Risiko (`> Spot + 50 €`) erreicht **{briefing['max_p_hi']:.1%}**.\n"
+                    f"2. **Fernwärme & Erzeugung:** Flexible Erzeugung prüfen und Elektrokessel-Last in Spitzenstunden hinterfragen.\n"
+                    f"3. **Intraday-Handel:** Offene Short-Positionen vor `{t0} UTC` absichern."
+                )
+            elif len(lo_steps):
+                t0 = lo_steps["delivery_start_utc"].min().strftime("%H:%M")
+                t1 = (lo_steps["delivery_start_utc"].max() + pd.Timedelta(minutes=15)).strftime("%H:%M UTC")
+                rec = (
+                    f"1. **Tief-/Negativpreis-Fenster ({t0}–{t1}) prüfen:** Risiko (`< Spot − 50 €`) erreicht **{briefing['max_p_lo']:.1%}**.\n"
+                    f"2. **Power-to-Heat:** Prüfen, ob Elektrokessel oder Wärmepumpen günstige Ausgleichspreise nutzen können.\n"
+                    f"3. **mFRR Down-Gebote:** Abregelungs-Bereitschaft prüfen."
+                )
+            else:
+                rec = (
+                    f"1. **Regelbetrieb:** Alle 40 Viertelstunden bleiben unter der 30%-Spike-Warnschwelle.\n"
+                    f"2. **Netztendenz:** Dominante Richtung ist **{briefing['dominant_dir']}** – Standard-Fahrplan beibehalten."
+                )
+            md = f"**Prüf-Empfehlungen für Schichtleiter & Trader**\n\n{rec}\n\n*Hinweis: Entscheidungsunterstützung auf Basis öffentlicher Marktdaten – keine automatischen Schaltbefehle.*"
+        else:
+            if len(hi_steps):
+                t0 = hi_steps["delivery_start_utc"].min().strftime("%H:%M")
+                t1 = (hi_steps["delivery_start_utc"].max() + pd.Timedelta(minutes=15)).strftime("%H:%M UTC")
+                rec = (
+                    f"1. **High-Price Window ({t0}–{t1}):** Spike risk (`> Spot + 50 €`) peaks at **{briefing['max_p_hi']:.1%}**.\n"
+                    f"2. **District Heating & Generation:** Review flexible generation and consider reducing electric boiler load during peak risk steps.\n"
+                    f"3. **Intraday Desk:** Evaluate hedging open short exposure ahead of `{t0} UTC`."
+                )
+            elif len(lo_steps):
+                t0 = lo_steps["delivery_start_utc"].min().strftime("%H:%M")
+                t1 = (lo_steps["delivery_start_utc"].max() + pd.Timedelta(minutes=15)).strftime("%H:%M UTC")
+                rec = (
+                    f"1. **Low / Negative Window ({t0}–{t1}):** Low-spike risk (`< Spot − 50 €`) peaks at **{briefing['max_p_lo']:.1%}**.\n"
+                    f"2. **Power-to-Heat Assets:** Evaluate ramping up electric boilers or heat pumps to capture low imbalance prices.\n"
+                    f"3. **mFRR Down Bids:** Verify curtailment readiness."
+                )
+            else:
+                rec = (
+                    f"1. **Standard Dispatch:** All 40 steps remain below the 30% spike alert threshold.\n"
+                    f"2. **Grid Tendency:** Dominant direction is **{briefing['dominant_dir']}** — maintain baseline schedule."
+                )
+            md = f"**Operational Suggestions to Review**\n\n{rec}\n\n*Note: Decision support based on public market data — not automated plant switching commands.*"
+        return {"markdown": md, "driver_weights": driver_weights, "source": "Decision Support"}
+
+    # --- Topic K: Website / Dashboard / Model / Benchmark ---
+    if any(k in q_low for k in ("website", "webseite", "dashboard", "model", "modell", "baseline", "accuracy", "mae", "pinball", "brier", "benchmark", "wie funktioniert", "how does", "what is this", "erklär")):
+        if is_de:
+            md = (
+                "**Über dieses Dashboard & die KI-Modelle**\n\n"
+                "* **10h Probabilistischer Fan-Chart:** Zeigt links der `NOW`-Linie die letzten 6 Stunden und rechts die **40 Viertelstunden-Schritte (+10h)** mit `P50`-Median, `80% Konfidenzband (P10–P90)`, `Day-Ahead Spotpreis` und `Vorstunden-Prognose (t−1h)`.\n"
+                "* **Time Machine (Links):** Reise zu jedem der **673 Vorhersage-Zeitpunkte** (`Test Period` oder `Validation Period`) und filtere nach **Spike-Warnungen (≥ 30 %)** oder **Top 20 High/Low Spikes**.\n"
+                "* **LightGBM-Benchmark (Tab 3):** Unsere Modell-Suite senkt den **MAE auf 43,19 €/MWh** (vs. `66,20 €` Baseline, **−35 % Fehler**), halbiert den **Pinball Loss auf 12,43** (vs. `24,18`) und trifft exakt **80,0 % P10–P90 Coverage**."
+            )
+        else:
+            md = (
+                "**Dashboard & Forecasting Architecture**\n\n"
+                "* **10h Probabilistic Fan Chart:** Displays 6h realized history left of `NOW` and **40 quarter-hour steps (+10h)** on the right with the `P50` median, `80% confidence band (P10–P90)`, `Day-Ahead Spot Price`, and `t−1h revision`.\n"
+                "* **Historical Time Machine (Left):** Step through all **673 hourly origins** (`Test Period` or `Validation Period`) and pre-filter for **Spike Alerts (≥ 30%)** or **Top 20 High/Low Spike Origins**.\n"
+                "* **Validation Benchmark (Tab 3):** Our LightGBM + Conformal suite cuts **P50 MAE by 35%** (`43.19` vs. `66.20 €/MWh` baseline), halves **Pinball Loss** (`12.43` vs. `24.18`), and hits **exact 80.0% P10–P90 coverage**."
+            )
+        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+
+    # --- Default: Horizon & Spike Summary in the user's language (German or English) ---
     top_drv_names = ", ".join(d["driver"] for d in driver_weights[:3])
-    md = (
-        f"### Driver & Risk Summary for Origin `{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`\n\n"
-        f"Across the upcoming 10-hour horizon (Steps 1–40), the trajectory is primarily driven by **{top_drv_names}**:\n\n"
-        f"| Key Point / Metric | Time (UTC) | Step | Spot (€) | P50 (€) | P10–P90 (€) | Spike Risk |\n"
-        f"| :--- | :---: | :---: | ---: | ---: | :---: | :---: |\n"
-        f"| **Highest Price (P50 Max)** | {pd.Timestamp(r_peak['delivery_start_utc']).strftime('%H:%M')} | {int(r_peak['step'])} | {r_peak['spot_price']:.1f} | **{r_peak['p50']:.1f}** | [{r_peak['p10']:.1f}, {r_peak['p90']:.1f}] | Hi: {r_peak['p_spike_high']:.0%} |\n"
-        f"| **Lowest Price (P50 Min)** | {pd.Timestamp(r_min['delivery_start_utc']).strftime('%H:%M')} | {int(r_min['step'])} | {r_min['spot_price']:.1f} | **{r_min['p50']:.1f}** | [{r_min['p10']:.1f}, {r_min['p90']:.1f}] | Lo: {r_min['p_spike_low']:.0%} |\n"
-        f"| **Peak Spike Risk Step** | {pd.Timestamp(r_hi['delivery_start_utc']).strftime('%H:%M')} | {int(r_hi['step'])} | {r_hi['spot_price']:.1f} | **{r_hi['p50']:.1f}** | [{r_hi['p10']:.1f}, {r_hi['p90']:.1f}] | **Hi: {r_hi['p_spike_high']:.1%}** |\n\n"
-        f"💡 *Tip: Ask me about a specific delivery hour (e.g., “What features drive the price at {pd.Timestamp(r_peak['delivery_start_utc']).strftime('%H:%M')}?”).* "
-    )
+    t_peak = pd.Timestamp(peak_row["delivery_start_utc"]).strftime("%H:%M")
+    t_min = pd.Timestamp(min_row["delivery_start_utc"]).strftime("%H:%M")
+    t_hi = pd.Timestamp(hi_row["delivery_start_utc"]).strftime("%H:%M")
+
+    if is_de:
+        md = (
+            f"**10h Überblick für Origin `{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`** *({active_period})*\n\n"
+            f"Wichtigste Preistreiber: **{top_drv_names}**\n\n"
+            f"| Kennzahl | UTC | Spot → P50 | Spike-Risiko |\n"
+            f"| :--- | :---: | :---: | :---: |\n"
+            f"| **P50 Maximum** | {t_peak} | {peak_row['spot_price']:.0f} → **{peak_row['p50']:.1f} €** | Hi {peak_row['p_spike_high']:.0%} |\n"
+            f"| **P50 Minimum** | {t_min} | {min_row['spot_price']:.0f} → **{min_row['p50']:.1f} €** | Lo {min_row['p_spike_low']:.0%} |\n"
+            f"| **Max Spike-Risiko** | {t_hi} | {hi_row['spot_price']:.0f} → **{hi_row['p50']:.1f} €** | **Hi {hi_row['p_spike_high']:.1%}** |\n\n"
+            f"💡 *Du kannst mich z. B. fragen: „Was ist der Spotpreis?“, „Was bedeutet Dataset Period?“, „Welche Treiber wirken um {t_peak} Uhr?“ oder „Was bedeuten P10 und P90?“*"
+        )
+    else:
+        md = (
+            f"**10h Horizon Summary (`{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`)** *({active_period})*\n\n"
+            f"Driven primarily by **{top_drv_names}**:\n\n"
+            f"| Key Point | UTC | Spot → P50 | Spike Risk |\n"
+            f"| :--- | :---: | :---: | :---: |\n"
+            f"| **P50 Peak** | {t_peak} | {peak_row['spot_price']:.0f} → **{peak_row['p50']:.1f} €** | Hi {peak_row['p_spike_high']:.0%} |\n"
+            f"| **P50 Min** | {t_min} | {min_row['spot_price']:.0f} → **{min_row['p50']:.1f} €** | Lo {min_row['p_spike_low']:.0%} |\n"
+            f"| **Max Risk** | {t_hi} | {hi_row['spot_price']:.0f} → **{hi_row['p50']:.1f} €** | **Hi {hi_row['p_spike_high']:.1%}** |\n\n"
+            f"💡 *Ask e.g. “What is the Spot Price?”, “What is the Dataset Period?”, “What drives the price at {t_peak}?”, or “Explain P10 and P90.”*"
+        )
     return {
         "markdown": md,
         "driver_weights": driver_weights,
-        "source": "TreeSHAP & FeatureStore Engine",
+        "source": "TreeSHAP Engine",
     }

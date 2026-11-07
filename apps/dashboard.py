@@ -239,23 +239,9 @@ def _render_chat_sidebar(
     origin_df: pd.DataFrame,
     briefing: dict,
     selected_origin: pd.Timestamp,
+    ui_context: dict | None = None,
 ) -> None:
-    """Render the right-hand AI Explainability Chat Sidebar."""
-    st.markdown(
-        """
-        <div class="te-chat-panel-header">
-          <div class="te-chat-panel-title">
-            <span>🤖 AI Explainability Chat.</span>
-            <span class="te-chat-status-pill">Gemini + SHAP</span>
-          </div>
-          <p class="te-chat-panel-sub">
-            Ask in natural language about price drivers, delivery hours, spike risks, or operational suggestions.
-          </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
+    """Render the right-hand AI Copilot Sidebar inside a unified outer container."""
     if "te_chat_messages" not in st.session_state:
         st.session_state.te_chat_messages = []
     if "te_last_origin" not in st.session_state or st.session_state.te_last_origin != selected_origin:
@@ -266,122 +252,142 @@ def _render_chat_sidebar(
             {
                 "role": "assistant",
                 "markdown": (
-                    f"Hello! I have loaded all 40 quarter-hour steps for Origin **`{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`**.\n\n"
-                    f"* **Peak P50 Forecast:** **{peak_row['p50']:.1f} €/MWh** at **{peak_t}** (Spot: {peak_row['spot_price']:.1f} €)\n"
-                    f"* **Peak Spike Risk:** High **{briefing['max_p_hi']:.1%}** · Low **{briefing['max_p_lo']:.1%}**\n\n"
-                    f"Click a quick prompt below or ask e.g. *“What features drive the price at {peak_t[:5]}?”*."
+                    f"**Origin `{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}` loaded** *(40 steps)*\n\n"
+                    f"* **Peak P50:** **{peak_row['p50']:.1f} €/MWh** at **{peak_t}** *(Spot {peak_row['spot_price']:.1f} €)*\n"
+                    f"* **Spike Risk:** High **{briefing['max_p_hi']:.1%}** · Low **{briefing['max_p_lo']:.1%}**\n\n"
+                    f"Select a quick question below or ask anything about the forecast, Spot price, Dataset Period, or dashboard (EN / DE)."
                 ),
-                "driver_weights": [],
                 "source": "Situational Desk AI",
             }
         ]
 
-    # Quick-Prompt Buttons (2x2 compact grid)
-    peak_hour_str = pd.Timestamp(origin_df.loc[origin_df["p50"].idxmax(), "delivery_start_utc"]).strftime("%H:%M")
-    q_col1, q_col2 = st.columns(2)
-    triggered_prompt: str | None = None
-    with q_col1:
-        if st.button(f"🔍 Drivers at {peak_hour_str}", use_container_width=True, key="qp_peak"):
-            triggered_prompt = f"What features drive the price at {peak_hour_str}?"
-        if st.button("🔄 Change vs. t−1h", use_container_width=True, key="qp_rev"):
-            triggered_prompt = "What changed compared to the previous hour (t-1h)?"
-    with q_col2:
-        if st.button("⚡ Explain Spike Risk", use_container_width=True, key="qp_spike"):
-            triggered_prompt = "Why is there a spike risk in this horizon and when does it peak?"
-        if st.button("🏭 Review Suggestions", use_container_width=True, key="qp_rec"):
-            triggered_prompt = "What operational suggestions to review do you have for shift supervisors and traders?"
-
-    # Optional Gemini API key configuration
-    with st.expander("⚙️ Gemini API Connection & Chat Settings", expanded=False):
-        st.text_input(
-            "Google Gemini API Key (optional)",
-            type="password",
-            help="If provided (or set via GEMINI_API_KEY in environment), Gemini 2.0 Flash responds live grounded on the 40-step matrix. Without a key, the local TreeSHAP Explainability Engine responds instantaneously.",
-            key="gemini_api_key_input",
-        )
-        if st.button("🗑️ Reset Chat History", use_container_width=True):
-            st.session_state.te_chat_messages = st.session_state.te_chat_messages[:1]
-            st.rerun()
-
-    # Chat Input Form
-    with st.form("te_chat_form", clear_on_submit=True):
-        user_text = st.text_input(
-            "Ask the AI Assistant",
-            placeholder=f"e.g. What features drive the price at {peak_hour_str}?",
-            label_visibility="collapsed",
-        )
-        submitted = st.form_submit_button("Send Question ➤", type="primary", use_container_width=True)
-        if submitted and user_text.strip():
-            triggered_prompt = user_text.strip()
-
-    if triggered_prompt:
-        st.session_state.te_chat_messages.append({"role": "user", "markdown": triggered_prompt})
-        resp = generate_explainability_response(
-            question=triggered_prompt,
-            origin_df=origin_df,
-            briefing=briefing,
-            selected_origin=selected_origin,
-            api_key=st.session_state.get("gemini_api_key_input", ""),
-        )
-        st.session_state.te_chat_messages.append(
-            {
-                "role": "assistant",
-                "markdown": resp["markdown"],
-                "driver_weights": resp.get("driver_weights", []),
-                "source": resp.get("source", "TreeSHAP Engine"),
-            }
+    # Unified Outer Box wrapping the entire AI Assistant section
+    with st.container(border=True):
+        st.markdown(
+            """
+            <div class="te-section-header" style="margin-top:0; margin-bottom:0.55rem;">
+              <h3 class="te-section-title" style="font-size:1.3rem;">🤖 AI Assistant<span>.</span></h3>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-    # Render Chat Messages inside a clean scrollable container
-    chat_box = st.container(height=590, border=True)
-    with chat_box:
-        for msg in st.session_state.te_chat_messages:
-            if msg["role"] == "user":
-                st.markdown(
-                    f"""
-                    <div class="te-msg-user">
-                      <div class="te-msg-user-label">You · Trader / Shift Supervisor</div>
-                      {html.escape(msg["markdown"])}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+        # 1. TOP: Scrollable Chat History Container
+        chat_box = st.container(height=500, border=True)
+
+        # 2. MIDDLE ("dazwischen"): Quick-Prompt Suggestion Buttons
+        peak_hour_str = pd.Timestamp(origin_df.loc[origin_df["p50"].idxmax(), "delivery_start_utc"]).strftime("%H:%M")
+        st.markdown(
+            '<div class="te-quick-prompts-bar"><span>✨ Quick Questions</span><span>Click to ask</span></div>',
+            unsafe_allow_html=True,
+        )
+        q_col1, q_col2 = st.columns(2, gap="small")
+        triggered_prompt: str | None = None
+        with q_col1:
+            if st.button(f"🔍 Drivers at {peak_hour_str}", use_container_width=True, key="qp_peak"):
+                triggered_prompt = f"What features drive the price at {peak_hour_str}?"
+            if st.button("🔄 Change vs. t−1h", use_container_width=True, key="qp_rev"):
+                triggered_prompt = "What changed compared to the previous hour (t-1h)?"
+        with q_col2:
+            if st.button("⚡ Spike Risk Summary", use_container_width=True, key="qp_spike"):
+                triggered_prompt = "Why is there a spike risk in this horizon and when does it peak?"
+            if st.button("🏭 Review Actions", use_container_width=True, key="qp_rec"):
+                triggered_prompt = "What operational suggestions to review do you have for shift supervisors and traders?"
+
+        # 3. BOTTOM: Compact Single-Row Chat Input Form + Settings Expander
+        with st.form("te_chat_form", clear_on_submit=True, border=False):
+            in_col, btn_col = st.columns([3.3, 1.0], gap="small")
+            with in_col:
+                user_text = st.text_input(
+                    "Ask the AI Assistant",
+                    placeholder=f"Ask about {peak_hour_str}, Spot price, Dataset Period...",
+                    label_visibility="collapsed",
                 )
-            else:
-                src_badge = html.escape(msg.get("source", "AI Assistant"))
-                st.markdown(
-                    f"""
-                    <div class="te-msg-ai">
-                      <div class="te-msg-ai-label">⚡ Turku Energia AI · <span style="color:#F59B00;">{src_badge}</span></div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.markdown(msg["markdown"])
+            with btn_col:
+                submitted = st.form_submit_button("Send ➤", type="primary", use_container_width=True)
+            if submitted and user_text.strip():
+                triggered_prompt = user_text.strip()
 
-                # Render visual feature weighting bars if present
-                weights = msg.get("driver_weights") or []
-                if weights:
-                    bars_html = ['<div class="te-driver-box">']
-                    bars_html.append('<div class="te-driver-box-title">SHAP Feature Weighting in Requested Window:</div>')
-                    for w in weights:
-                        drv_name = html.escape(w["driver"])
-                        pct = float(w["pct"])
-                        bars_html.append(
-                            f"""
-                            <div class="te-driver-bar-row">
-                              <div class="te-driver-bar-top">
-                                <span>{drv_name}</span>
-                                <span>{pct:.1f}%</span>
-                              </div>
-                              <div class="te-driver-bar-track">
-                                <div class="te-driver-bar-fill" style="width:{min(100.0, pct * 1.8):.1f}%;"></div>
-                              </div>
-                            </div>
-                            """
+        with st.expander("⚙️ AI Model, API Key & Reset Chat", expanded=False):
+            st.selectbox(
+                "AI Model (used when API Key is provided)",
+                [
+                    "gemini-2.5-pro",
+                    "gemini-2.5-flash",
+                    "gemini-2.0-flash",
+                ],
+                index=0,
+                help=(
+                    "Select the primary LLM model. Also auto-detects OpenAI (gpt-4o if key starts with sk-...) "
+                    "or Groq (llama-3.3-70b-versatile if key starts with gsk_...)."
+                ),
+                key="preferred_llm_model",
+            )
+            st.text_input(
+                "API Key (Gemini AIza..., OpenAI sk-..., or Groq gsk_...)",
+                type="default",
+                placeholder="Paste API key here (masked automatically)...",
+                help="Masked via CSS (-webkit-text-security: disc) so Chrome's Google Password Manager never pops up.",
+                key="gemini_api_key_input",
+            )
+            if st.button("🗑️ Clear Chat History", use_container_width=True):
+                st.session_state.te_chat_messages = st.session_state.te_chat_messages[:1]
+                st.rerun()
+
+        # Process newly triggered question before rendering inside chat_box
+        if triggered_prompt:
+            prior_history = list(st.session_state.te_chat_messages)
+            st.session_state.te_chat_messages.append({"role": "user", "markdown": triggered_prompt})
+            resp = generate_explainability_response(
+                question=triggered_prompt,
+                origin_df=origin_df,
+                briefing=briefing,
+                selected_origin=selected_origin,
+                api_key=st.session_state.get("gemini_api_key_input", ""),
+                preferred_model=st.session_state.get("preferred_llm_model", "gemini-2.5-pro"),
+                ui_context=ui_context,
+                chat_history=prior_history,
+            )
+            st.session_state.te_chat_messages.append(
+                {
+                    "role": "assistant",
+                    "markdown": resp["markdown"],
+                    "source": resp.get("source", "Situational Desk AI"),
+                }
+            )
+
+        # Populate the top Chat Container with all messages (clean text & tables, no bulky SHAP bars)
+        with chat_box:
+            for idx, msg in enumerate(st.session_state.te_chat_messages):
+                if msg["role"] == "user":
+                    st.markdown(
+                        f"""
+                        <div class="te-msg-user">
+                          <div class="te-msg-user-label">You</div>
+                          {html.escape(msg["markdown"])}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    src_badge = html.escape(msg.get("source", "AI Assistant"))
+                    st.markdown(
+                        f"""
+                        <div class="te-msg-ai-header">
+                          <span>⚡ Turku Energia AI</span>
+                          <span style="color:#F59B00;">· {src_badge}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(msg["markdown"])
+
+                    if idx + 1 < len(st.session_state.te_chat_messages):
+                        st.markdown(
+                            "<hr style='margin:0.45rem 0; border:none; border-top:1px solid var(--te-border-subtle);'/>",
+                            unsafe_allow_html=True,
                         )
-                    bars_html.append("</div>")
-                    st.markdown("\n".join(bars_html), unsafe_allow_html=True)
-                st.divider()
+            st.markdown("<div id='te-chat-bottom-anchor'></div>", unsafe_allow_html=True)
 
 
 def main() -> None:
@@ -633,7 +639,7 @@ def main() -> None:
     # Split Layout: Main Data Dashboard (Left) + AI Chat Sidebar (Right)
     # ------------------------------------------------------------------
     if show_chat_sidebar:
-        main_col, chat_col = st.columns([2.65, 1.15], gap="large")
+        main_col, chat_col = st.columns([2.2, 1.15], gap="medium")
     else:
         main_col = st.container()
         chat_col = None
@@ -911,8 +917,16 @@ def main() -> None:
     # Right-Hand AI Explainability Chat Sidebar
     # ------------------------------------------------------------------
     if chat_col is not None:
+        ui_context = {
+            "selected_period": selected_period,
+            "filter_mode": filter_mode,
+            "origin_pos_str": f"{st.session_state.origin_idx + 1} / {len(origin_labels)}",
+            "cutoff_str": cutoff_ts.strftime("%Y-%m-%d %H:%M:%SZ"),
+            "show_hindsight": show_hindsight,
+            "dark_mode": dark_mode,
+        }
         with chat_col:
-            _render_chat_sidebar(origin_df, briefing, selected_origin)
+            _render_chat_sidebar(origin_df, briefing, selected_origin, ui_context=ui_context)
 
     # Mount the Sun <-> Moon toggle button into Streamlit's top toolbar (at bottom of DOM to avoid top gap)
     st.button(
@@ -921,7 +935,8 @@ def main() -> None:
         on_click=_toggle_theme,
         help="Switch between Control-Room Dark Mode (Moon) and Web Light Mode (Sun)",
     )
-    components.html(get_toolbar_theme_toggle_html(dark_mode=dark_mode), height=0)
+    chat_msg_count = len(st.session_state.get("te_chat_messages", []))
+    components.html(get_toolbar_theme_toggle_html(dark_mode=dark_mode, chat_msg_count=chat_msg_count), height=0)
 
 
 if __name__ == "__main__":
