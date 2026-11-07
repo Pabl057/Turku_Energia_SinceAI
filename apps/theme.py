@@ -729,6 +729,11 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         position: relative;
         overflow: hidden;
         animation: teCardEnter 240ms var(--ease-out) both;
+        /* Flex column so the rectangular tag sits flush at the bottom of every card */
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        box-sizing: border-box;
       }}
 
       /* Non-uniform stagger (choreograph Rule #3: shrinking delays 20ms -> 55ms -> 85ms -> 110ms -> 130ms) */
@@ -806,6 +811,9 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         border-radius: 0 !important;
         background: var(--te-delta-bg);
         border: 1px solid {"rgba(90, 200, 250, 0.28)" if dark_mode else "rgba(0, 102, 204, 0.22)"};
+        /* Bottom-align the tag inside the KPI card */
+        margin-top: auto;
+        align-self: flex-start;
       }}
 
       .te-kpi-delta.warn {{
