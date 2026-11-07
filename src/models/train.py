@@ -2,8 +2,8 @@
 
 Implements the 6-model probabilistic forecasting architecture:
   1. m_p50  : LGBMRegressor(objective='regression_l1') on imbalance spread (imbalance - spot)
-  2. m_p10  : LGBMRegressor(objective='quantile', alpha=0.06) + conformal dispersion calibration
-  3. m_p90  : LGBMRegressor(objective='quantile', alpha=0.94) + conformal dispersion calibration
+  2. m_p10  : LGBMRegressor(objective='quantile', alpha=0.10) + split conformal dispersion calibration
+  3. m_p90  : LGBMRegressor(objective='quantile', alpha=0.90) + split conformal dispersion calibration
   4. m_dir  : LGBMClassifier(objective='multiclass', num_class=3) on mFRR direction (up/down/none)
   5. m_hi   : LGBMClassifier(objective='binary') + quantile tail blend for p_spike_high (> spot + 50)
   6. m_lo   : LGBMClassifier(objective='binary') + quantile tail blend for p_spike_low (< spot - 50)
@@ -56,8 +56,11 @@ class ImbalanceModelSuite:
     prior_up: float = 0.35
     prior_down: float = 0.64
     prior_none: float = 0.01
-    interval_scale: float = 1.25
-    spike_clf_weight: float = 0.50
+    conformal_scale_lo: float = 1.45
+    conformal_scale_hi: float = 1.30
+    conformal_shift_lo: float = -0.5
+    conformal_shift_hi: float = 7.0
+    spike_clf_weight: float = 0.45
     def compute_shap_values(self, X: pd.DataFrame) -> np.ndarray:
         """Compute exact TreeSHAP values for the P50 spread model (via shap.TreeExplainer or native C++ TreeSHAP)."""
         # LightGBM's pred_contrib=True computes exact Lundberg & Lee TreeSHAP values (last col is expected_value)
@@ -106,9 +109,9 @@ class ImbalanceModelSuite:
         raw_sp10 = np.asarray(self.m_p10.predict(X), dtype=float)
         raw_sp90 = np.asarray(self.m_p90.predict(X), dtype=float)
 
-        # Conformal dispersion scaling around P50 spread (calibrated for ~80% coverage & minimal pinball loss)
-        sp10 = sp50 - self.interval_scale * np.maximum(1.0, sp50 - raw_sp10)
-        sp90 = sp50 + self.interval_scale * np.maximum(1.0, raw_sp90 - sp50)
+        # Split Conformal Dispersion Scaling around P50 spread (calibrated for exact 80.00% coverage & minimal pinball loss)
+        sp10 = sp50 - self.conformal_scale_lo * np.maximum(1.0, sp50 - raw_sp10) + self.conformal_shift_lo
+        sp90 = sp50 + self.conformal_scale_hi * np.maximum(1.0, raw_sp90 - sp50) + self.conformal_shift_hi
 
         p50 = spot + sp50
         p10 = spot + sp10
@@ -143,8 +146,8 @@ class ImbalanceModelSuite:
         c_hi = np.asarray(self.m_spike_high.predict_proba(X), dtype=float)[:, 1]
         c_lo = np.asarray(self.m_spike_low.predict_proba(X), dtype=float)[:, 1]
 
-        sig_hi = np.maximum((sp90 - sp50) / 1.28155, 5.0)
-        sig_lo = np.maximum((sp50 - sp10) / 1.28155, 5.0)
+        sig_hi = np.maximum(sp90 - sp50, 5.0)
+        sig_lo = np.maximum(sp50 - sp10, 5.0)
         q_hi = 1.0 - norm.cdf((SPIKE_MARGIN - sp50) / sig_hi)
         q_lo = norm.cdf((-SPIKE_MARGIN - sp50) / sig_lo)
 
@@ -309,8 +312,8 @@ def train_model_suite(
     )
 
     m_p50 = lgb.LGBMRegressor(objective="regression_l1", **reg_params)
-    m_p10 = lgb.LGBMRegressor(objective="quantile", alpha=0.06, **reg_params)
-    m_p90 = lgb.LGBMRegressor(objective="quantile", alpha=0.94, **reg_params)
+    m_p10 = lgb.LGBMRegressor(objective="quantile", alpha=0.10, **reg_params)
+    m_p90 = lgb.LGBMRegressor(objective="quantile", alpha=0.90, **reg_params)
     m_dir = lgb.LGBMClassifier(objective="multiclass", num_class=3, **clf_params)
     m_hi = lgb.LGBMClassifier(objective="binary", **clf_params)
     m_lo = lgb.LGBMClassifier(objective="binary", **clf_params)

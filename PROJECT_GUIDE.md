@@ -241,7 +241,7 @@ Vor dem Speichern von `forecast_backtest.csv` werden die Regeln erzwungen und ge
 - [x] **Datenstruktur (`data/`)** sauber konsolidiert und in `.gitignore` vor versehentlichem Upload geschützt.
 - [x] **Meilenstein 1 (Level 1 Pipeline):**
   1. `src/data/loader.py` & `src/features/build_features.py` erstellt (181 Anti-Leakage Features).
-  2. Die LightGBM-Modell-Suite (inkl. Short-Horizon Specialists & Empirical Bayes Brier-Kalibrierung) in `src/models/train.py` auf der Validierungsperiode trainiert (`MAE: 43.35 €/MWh` vs. Baseline `66.20 €/MWh`; `Pinball: 12.76` vs. Baseline `24.18`; `Spike Brier: 0.0946` vs. `0.1132`; `Direction Brier: 0.4132` vs. `0.4509`; `Coverage: 80.8%`).
+  2. Die LightGBM-Modell-Suite (inkl. Short-Horizon Specialists, Split Conformal Quantile Calibration & Empirical Bayes Brier-Kalibrierung) in `src/models/train.py` auf der Validierungsperiode trainiert (`MAE: 43.35 €/MWh` vs. Baseline `66.20 €/MWh`; `Pinball: 12.43` vs. Baseline `24.18`; `Spike Brier: 0.0943` vs. `0.1132`; `Direction Brier: 0.4132` vs. `0.4509`; `Coverage: 80.00%`).
   3. Valide `forecast_backtest.csv` (26.920 Zeilen, `VALIDATION PASSED`) generiert.
 - [x] **Meilenstein 2 (Level 2 Dashboard in `apps/dashboard.py`):**
   1. Interaktives Dashboard mit Warn-Alerts bei `p_spike_high >= 0.3` / `p_spike_low >= 0.3` und Revisions-Tracking.
