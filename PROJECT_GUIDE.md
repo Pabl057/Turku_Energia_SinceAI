@@ -237,12 +237,12 @@ Vor dem Speichern von `forecast_backtest.csv` werden die Regeln erzwungen und ge
 
 ## 6. Kurz-Checkliste für das Team
 
-- [x] **Python-Umgebung (`./venv`)** mit Python 3.12, `lightgbm`, `shap`, `pandas`, `numpy`, `scikit-learn`, `jupyter` installiert.
+- [x] **Python-Umgebung (`./venv`)** mit Python 3.12, `lightgbm`, `shap`, `pandas`, `numpy`, `scikit-learn`, `jupyter`, `streamlit`, `plotly` installiert.
 - [x] **Datenstruktur (`data/`)** sauber konsolidiert und in `.gitignore` vor versehentlichem Upload geschützt.
-- [ ] **Nächster Meilenstein (Level 1 Pipeline):**
-  1. `src/data/loader.py` & `src/features/build_features.py` erstellen.
-  2. Die 6 LightGBM-Modelle in `src/models/` auf der Validierungsperiode trainieren und die Baseline (`MAE < 66.20 €/MWh`) schlagen.
-  3. Erste valide `forecast_backtest.csv` (26.920 Zeilen) generieren.
-- [ ] **Über-nächster Meilenstein (Level 2 Dashboard in `apps/`):**
-  1. Interaktives Dashboard mit Warn-Alerts bei `p_spike_high > 0.3` / `p_spike_low > 0.3`.
-  2. „Time Machine“-Slider zum Durchklicken der 673 historischen Forecast Origins inkl. `top_drivers` (SHAP).
+- [x] **Meilenstein 1 (Level 1 Pipeline):**
+  1. `src/data/loader.py` & `src/features/build_features.py` erstellt (175 Anti-Leakage Features).
+  2. Die 6 LightGBM-Modelle in `src/models/train.py` auf der Validierungsperiode trainiert (`MAE: 43.72 €/MWh` vs. Baseline `66.20 €/MWh`; `Pinball: 12.57` vs. Baseline `24.18`; `Coverage: 80.8%`).
+  3. Valide `forecast_backtest.csv` (26.920 Zeilen, `VALIDATION PASSED`) generiert.
+- [x] **Meilenstein 2 (Level 2 Dashboard in `apps/dashboard.py`):**
+  1. Interaktives Dashboard mit Warn-Alerts bei `p_spike_high >= 0.3` / `p_spike_low >= 0.3` und Revisions-Tracking.
+  2. „Time Machine“-Auswahl zum Durchklicken aller 673 Test- und 672 Validierungs-Origins inkl. `top_drivers` (TreeSHAP) und JSON-API-Export.

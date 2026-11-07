@@ -13,3 +13,7 @@ scikit-learn>=1.4
 pyarrow>=14
 requests>=2.31
 tzdata>=2024.1
+
+# Level 2 Dashboard & Visualization
+streamlit>=1.38
+plotly>=5.24

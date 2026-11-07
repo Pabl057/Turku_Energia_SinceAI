@@ -1,0 +1,158 @@
+{
+  ".agents/hooks.json": {
+    "mtime": 1794006450.6236014,
+    "seen": 1794020272.128876,
+    "ast_hash": "6aff7ee57fa2e7a2e292c0936ca08d4f",
+    "semantic_hash": "6aff7ee57fa2e7a2e292c0936ca08d4f"
+  },
+  ".claude/settings.json": {
+    "mtime": 1794018825.4553182,
+    "seen": 1794020272.128879,
+    "ast_hash": "f5fe0467cc5a486a298f47d60d00e6a3",
+    "semantic_hash": "f5fe0467cc5a486a298f47d60d00e6a3"
+  },
+  ".codex/hooks.json": {
+    "mtime": 1794018825.4555519,
+    "seen": 1794020272.12888,
+    "ast_hash": "7ab1958698cd8416c7769038ba29a0f3",
+    "semantic_hash": "7ab1958698cd8416c7769038ba29a0f3"
+  },
+  ".cursor/hooks.json": {
+    "mtime": 1794018825.4561934,
+    "seen": 1794020272.128881,
+    "ast_hash": "d76d96ceb7ab87e99534f37bd482b043",
+    "semantic_hash": "d76d96ceb7ab87e99534f37bd482b043"
+  },
+  ".entire/settings.json": {
+    "mtime": 1794006450.6241336,
+    "seen": 1794020272.128881,
+    "ast_hash": "ebc0cdae27aa7e32ba33fc2a2125acda",
+    "semantic_hash": "ebc0cdae27aa7e32ba33fc2a2125acda"
+  },
+  ".factory/settings.json": {
+    "mtime": 1794018825.45635,
+    "seen": 1794020272.128882,
+    "ast_hash": "45e8951dd95aad3b57afaa84a70ec81b",
+    "semantic_hash": "45e8951dd95aad3b57afaa84a70ec81b"
+  },
+  ".github/hooks/entire.json": {
+    "mtime": 1794018825.4560285,
+    "seen": 1794020272.128882,
+    "ast_hash": "9af8a09316000592dc06e8600d797e04",
+    "semantic_hash": "9af8a09316000592dc06e8600d797e04"
+  },
+  ".opencode/plugin/entire.ts": {
+    "mtime": 1794018825.4568682,
+    "seen": 1794020272.128883,
+    "ast_hash": "879868c79413d1fb6e57534e3ca33fc6",
+    "semantic_hash": "879868c79413d1fb6e57534e3ca33fc6"
+  },
+  ".pi/extensions/entire/index.ts": {
+    "mtime": 1794018825.4571536,
+    "seen": 1794020272.128883,
+    "ast_hash": "636e457ea754d7468a84549fd783126d",
+    "semantic_hash": "636e457ea754d7468a84549fd783126d"
+  },
+  "build_dataset.py": {
+    "mtime": 1794006450.6250489,
+    "seen": 1794020272.128884,
+    "ast_hash": "37500dc796d8b70bfdafa775de882b62",
+    "semantic_hash": "37500dc796d8b70bfdafa775de882b62"
+  },
+  "make_templates.py": {
+    "mtime": 1794006450.62519,
+    "seen": 1794020272.128884,
+    "ast_hash": "730111f6fcc96c8c9cfc05599baae5d5",
+    "semantic_hash": "730111f6fcc96c8c9cfc05599baae5d5"
+  },
+  "score.py": {
+    "mtime": 1794006450.6256785,
+    "seen": 1794020272.128885,
+    "ast_hash": "dd78d58f748c8fc52e2870c93991f494",
+    "semantic_hash": "dd78d58f748c8fc52e2870c93991f494"
+  },
+  "src/__init__.py": {
+    "mtime": 1794006450.6257987,
+    "seen": 1794020272.128885,
+    "ast_hash": "47b6d664e1c2e363e7c4f5a5b2f03320",
+    "semantic_hash": "47b6d664e1c2e363e7c4f5a5b2f03320"
+  },
+  "src/data/__init__.py": {
+    "mtime": 1794006450.625913,
+    "seen": 1794020272.128886,
+    "ast_hash": "2be0ea9f8692fde8962073c7c99d2042",
+    "semantic_hash": "2be0ea9f8692fde8962073c7c99d2042"
+  },
+  "src/evaluation/__init__.py": {
+    "mtime": 1794006450.6260204,
+    "seen": 1794020272.128886,
+    "ast_hash": "44989dbee65fe30a2e1033c33d12243c",
+    "semantic_hash": "44989dbee65fe30a2e1033c33d12243c"
+  },
+  "src/features/__init__.py": {
+    "mtime": 1794006450.626129,
+    "seen": 1794020272.128887,
+    "ast_hash": "01b4021cd36716a3a75f4a540284c22e",
+    "semantic_hash": "01b4021cd36716a3a75f4a540284c22e"
+  },
+  "src/models/__init__.py": {
+    "mtime": 1794006450.6262295,
+    "seen": 1794020272.128887,
+    "ast_hash": "b0f31bf1c2b041329bfd939297ebe1a0",
+    "semantic_hash": "b0f31bf1c2b041329bfd939297ebe1a0"
+  },
+  "validate_submission.py": {
+    "mtime": 1794006450.6263537,
+    "seen": 1794020272.1288881,
+    "ast_hash": "99845443c0ddd8565a958e7d2aba56a9",
+    "semantic_hash": "99845443c0ddd8565a958e7d2aba56a9"
+  },
+  ".agents/skills/entire-workflow/SKILL.md": {
+    "mtime": 1794006450.6237938,
+    "seen": 1794020272.1288881,
+    "ast_hash": "ef72473dbb203ab19315b409501b1c5b",
+    "semantic_hash": "ef72473dbb203ab19315b409501b1c5b"
+  },
+  ".agents/skills/turku-imbalance-forecasting/SKILL.md": {
+    "mtime": 1794006450.6239355,
+    "seen": 1794020272.128889,
+    "ast_hash": "59c418c66701dd9e217335bf4b4b0a51",
+    "semantic_hash": "59c418c66701dd9e217335bf4b4b0a51"
+  },
+  "AGENTS.md": {
+    "mtime": 1794006450.624389,
+    "seen": 1794020272.128889,
+    "ast_hash": "0d60057942e113478466b77846245d4d",
+    "semantic_hash": "0d60057942e113478466b77846245d4d"
+  },
+  "CHALLENGE_BRIEF.md": {
+    "mtime": 1794006450.6245353,
+    "seen": 1794020272.12889,
+    "ast_hash": "ad4d01dd1c61940449376e3320b551f9",
+    "semantic_hash": "ad4d01dd1c61940449376e3320b551f9"
+  },
+  "PROJECT_GUIDE.md": {
+    "mtime": 1794018940.7994,
+    "seen": 1794020272.12889,
+    "ast_hash": "7ea7e838325291611eaae967aaff39df",
+    "semantic_hash": "7ea7e838325291611eaae967aaff39df"
+  },
+  "README.md": {
+    "mtime": 1794006450.6247113,
+    "seen": 1794020272.128891,
+    "ast_hash": "02811af3fe3212ca290c079d702a1b58",
+    "semantic_hash": "02811af3fe3212ca290c079d702a1b58"
+  },
+  "notes.md": {
+    "mtime": 1794006450.6254723,
+    "seen": 1794020272.128891,
+    "ast_hash": "0ae5ba64adc462b6200c897df58b6102",
+    "semantic_hash": "0ae5ba64adc462b6200c897df58b6102"
+  },
+  "requirements.txt": {
+    "mtime": 1794006450.625554,
+    "seen": 1794020272.128892,
+    "ast_hash": "44f9c4306e6c57692f19f91ef4d7810c",
+    "semantic_hash": "44f9c4306e6c57692f19f91ef4d7810c"
+  }
+}
