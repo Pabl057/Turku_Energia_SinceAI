@@ -316,8 +316,8 @@ def _render_chat_sidebar(
                         "API Key (Google AI Studio, OpenAI, Groq, or Claude)",
                         value=st.session_state.get("saved_llm_api_key", ""),
                         type="default",
-                        placeholder="Paste API key (AIza..., sk-..., gsk_...)...",
-                        help="Provider and best model are selected automatically from your key.",
+                        placeholder="Paste your API key here...",
+                        help="Provider and best model are selected automatically.",
                         key="gemini_api_key_input",
                     )
                     saved_click = st.form_submit_button("💾 Save API Key", type="primary", use_container_width=True)
@@ -330,10 +330,7 @@ def _render_chat_sidebar(
                 ).strip()
                 if active_key_now:
                     st.session_state.saved_llm_api_key = active_key_now
-                    if active_key_now.startswith(("AIza", "sk-", "gsk_")):
-                        st.caption(f"🟢 **Live API Key active** (`{active_key_now[:6]}...`)")
-                    else:
-                        st.caption("⚠️ **Unrecognized key prefix** — use Google AI Studio (`AIza...`), OpenAI (`sk-...`), or Groq (`gsk_...`).")
+                    st.caption(f"🟢 **Live API Key active** (`{active_key_now[:4]}...`)")
                 else:
                     st.caption("⚪ **Built-in Local Engine active** (paste key above for live LLM)")
                 if st.button("🗑️ Clear Chat History", use_container_width=True):

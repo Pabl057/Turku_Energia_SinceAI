@@ -298,14 +298,7 @@ def _call_llm_api(prompt: str, api_key: str, preferred_model: str | None = None)
         except Exception as exc:
             return None, f"Groq API: {exc}"
 
-    # Detect if user accidentally pasted a non-LLM key (e.g. Pruna AI key instead of Gemini AIza... key)
-    if not key.startswith("AIza") and len(key) < 38:
-        return (
-            None,
-            "Key format not recognized (expected Google AI Studio 'AIza...', OpenAI 'sk-...', or Groq 'gsk_...')",
-        )
-
-    # 4. Google AI Studio (Gemini) — automatically cascades across current active models
+    # 4. Google AI Studio / Vertex AI Express (Gemini) — accepts any key prefix (AIza..., AQ..., etc.)
     gemini_models = [
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
@@ -313,44 +306,62 @@ def _call_llm_api(prompt: str, api_key: str, preferred_model: str | None = None)
         "gemini-2.5-pro",
         "gemini-2.0-flash",
     ]
+    endpoints = (
+        [
+            "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent",
+            "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        ]
+        if key.startswith("AQ.")
+        else [
+            "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent",
+        ]
+    )
     last_err = None
-    for model_name in gemini_models:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
-            gen_cfg: dict = {"temperature": 0.25, "maxOutputTokens": 2048}
-            if "2.5" in model_name or "3-" in model_name:
-                gen_cfg["thinkingConfig"] = {"thinkingBudget": 256}
-            resp = requests.post(
-                url,
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
+    for base_tpl in endpoints:
+        key_invalid_on_endpoint = False
+        for model_name in gemini_models:
+            try:
+                url = base_tpl.format(model=model_name)
+                gen_cfg: dict = {"temperature": 0.25, "maxOutputTokens": 2048}
+                if "2.5" in model_name or "3-" in model_name:
+                    gen_cfg["thinkingConfig"] = {"thinkingBudget": 256}
+                body = {
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                     "generationConfig": gen_cfg,
-                },
-                timeout=18,
-            )
-            if resp.status_code == 400 and "thinkingConfig" in gen_cfg:
-                gen_cfg.pop("thinkingConfig", None)
+                }
                 resp = requests.post(
                     url,
-                    json={
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": gen_cfg,
-                    },
+                    params={"key": key},
+                    headers={"Content-Type": "application/json"},
+                    json=body,
                     timeout=18,
                 )
-            if resp.status_code == 200:
-                text = _extract_gemini_text(resp.json())
-                if text:
-                    return text, "Gemini · Live"
-                last_err = f"{model_name} returned empty response"
-            else:
-                err_json = resp.json() if resp.content else {}
-                msg = err_json.get("error", {}).get("message", f"HTTP {resp.status_code}")
-                last_err = msg
-                if resp.status_code in (400, 401, 403) and "API key not valid" in msg:
-                    break
-        except Exception as exc:
-            last_err = str(exc)
+                if resp.status_code == 400 and "thinkingConfig" in gen_cfg:
+                    gen_cfg.pop("thinkingConfig", None)
+                    resp = requests.post(
+                        url,
+                        params={"key": key},
+                        headers={"Content-Type": "application/json"},
+                        json=body,
+                        timeout=18,
+                    )
+                if resp.status_code == 200:
+                    text = _extract_gemini_text(resp.json())
+                    if text:
+                        return text, "Gemini · Live"
+                    last_err = f"{model_name} returned empty response"
+                else:
+                    err_json = resp.json() if resp.content else {}
+                    msg = err_json.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                    last_err = msg
+                    if resp.status_code in (400, 401, 403) and ("API key not valid" in msg or "API_KEY_INVALID" in str(err_json)):
+                        key_invalid_on_endpoint = True
+                        break
+            except Exception as exc:
+                last_err = str(exc)
+        if not key_invalid_on_endpoint:
+            break
     return None, last_err
 
 def _build_reasoning_trace(
