@@ -1,0 +1,377 @@
+Erstelle eine Data-Science Ordnerstruktur mit den Ordnern 'notebooks' und 'src'. Erstelle eine 'requirements.txt' mit den Paketen pandas, numpy, lightgbm, shap und jupyter. ergänze '.gitignore' Datei, die den Ordner 'data/' und 'venv/' für Git blockiert." und füge ine skills hinzu wir benutzten entire
+
+---
+
+okay pushe
+
+---
+
+hast du die python umgebung gemacht die bei agents.md
+
+---
+
+vergess nciht die agents.md zu updaten wenn die struktur sich verändert hat oder ahte dich an die struktur
+
+---
+
+okay muss ich die gitignore anpassen wegen agy
+
+---
+
+muss jeder das locale ding selber python selber installieren
+
+---
+
+entire checkpoint list
+
+---
+
+okay warum steht bei meienem kollegen nichts drinne
+
+---
+
+bei meinem  freudn steht please commit or stash wenn ich pull mache
+
+---
+
+muss ich noch was commiten weil jetzt ist doch die aktuelle convo nicht auf dem neusten stand und würde es später nicht merge conflicts machen
+
+---
+
+okay tu alle daten also die csv daten rein also was am meisten sinn macht
+
+---
+
+ich habe die git connection entfernt
+
+---
+
+was ich will ist das du nur einfach das projekt restructures und alle daten in eine data ordner reinpackst
+
+---
+
+# Turku Energia Imbalance Price Forecasting: Ein technischer Leitfaden für Informatiker
+
+Dieser Leitfaden bereitet das Machine-Learning-Projekt der **Turku Energia Imbalance Price Challenge** (im Rahmen des *Since AI Hackathons 2026*) systematisch für Informatik-Studierende auf. Das Dokument fasst alle zentralen Fragen zur Marktlogik, zur Datenverarbeitung, zum Modelltraining mit Gradient Boosting sowie zur Evaluierung zusammen und stellt die Zusammenhänge in einer durchgängigen Software- und ML-Pipeline dar.
+
+---
+
+## 1. Projekt-Hintergrund und Problemstellung
+
+Die Energiewende und der zügige Ausbau erneuerbarer Energien wie Wind- und Solarkraft führen im finnischen Stromnetz zu stark schwankenden Erzeugungsmengen. Da elektrische Energie im Netz kaum in großem Maßstab gespeichert werden kann, müssen Erzeugung und Verbrauch in jedem Augenblick exakt übereinstimmen. Abweichungen zwischen der geplanten und der tatsächlich eingetroffenen Erzeugung oder Last werden als **Unbalance (Imbalance)** bezeichnet und über den **Ausgleichsenergiepreis (Imbalance Price)** finanziell abgerechnet.
+
+Für Energieversorger wie Turku Energia führt eine geringe Vorhersehbarkeit dieser Preise zu finanziellen Risiken. Ziel des Projekts ist die Entwicklung eines Machine-Learning-Systems, das stündlich eine Prognose für die kommenden **10 Stunden in 15-Minuten-Intervallen** (40 Zukunfts-Schritte) erzeugt. Das System dient als Entscheidungsunterstützung für Schichtleiter in der Erzeugung sowie Stromhändler.
+
+### Die Struktur der Challenge
+
+Die Bewertung der Challenge gliedert sich in zwei Hauptstufen, welche die technische Leistungsfähigkeit sowie den praktischen Kundennutzen bewerten:
+
+1. **Level 1: Prognosequalität und mathematische Fundierung (80 % der Gesamtwertung)**
+   * **Preisprognose (30 %):** Genauigkeit der Median-Prognose ($P_{50}$) gemessen am mittleren absoluten Fehler (MAE).
+   * **Unsicherheitskalibrierung (20 %):** Güte des $P_{10}$–$P_{90}$ Unsicherheitsintervalls über den Pinball Loss (Ziel: ca. 80 % der realen Preise liegen im Intervall).
+   * **Preisspitzen-Erkennung (20 %):** Vorhersage außergewöhnlicher Preisausschläge von mehr als $\pm 50$ €/MWh gegenüber dem Spotpreis.
+   * **Regelrichtung (10 %):** Klassifikationsgenauigkeit der dominanten mFRR-Regelrichtung des Netzes.
+   * **Argumentationskette (20 %):** Nachvollziehbarkeit der Feature-Erstellung und Modellentscheidungen (beurteilt durch die Jury).
+
+2. **Level 2: Lageüberblick und Usability (20 % der Gesamtwertung)**
+   * Entwicklung eines Dashboards oder einer API für Experten, die kritische Marktveränderungen (z. B. erhöhtes Spike-Risiko) auf einen Blick visualisiert und historische Rückblicke (Backtesting-Inspektion) ermöglicht.
+
+---
+
+## 2. Energiemarkt-Grundlagen und Preisbildungsmechanismen
+
+Um effektive Features zu entwickeln, muss die physikalische und ökonomische Funktionsweise des Strommarkts verstanden werden. Die Preisbildung verläuft über drei aufeinander aufbauende Phasen, die den Weg von der ursprünglichen Fahrplanplanung bis zur finalen finanziellen Abrechnung beschreiben:
+
+1. **Day-Ahead-Markt (Nord Pool):** Fixierung der verbindlichen Erzeugungs- und Verbrauchs-Fahrpläne sowie des Spotpreises am Vortag um 14:00 Uhr finnischer Zeit (D-1).
+2. **Intraday-Markt & Regelenergie (Fingrid):** Kurzfristige Handelskorrekturen im Tagesverlauf sowie der physikalische Einsatz von Regelreserven (mFRR und aFRR) bei ungeplanten Frequenzabweichungen.
+3. **Ausgleichsenergieabrechnung (Imbalance Settlement):** Finanzielle Nachberechnung verbleibender Differenzen zwischen Fahrplan und Ist-Verbrauch zum Ausgleichsenergiepreis.
+
+### Der Day-Ahead Spotpreis
+
+Der **Spotpreis** ist der Referenzpreis für Strom, der am Vortag (*Day-Ahead*) an der Strombörse Nord Pool für jede Stunde des Folgetages per Auktion ermittelt wird. Er wird täglich um 14:00 Uhr finnischer Ortszeit (11:00 UTC im Sommer) für den nächsten Tag verfasst und veröffentlicht.
+
+Der Spotpreis bildet im Modell die primäre Orientierungslinie. Wenn im Stromnetz in einer Viertelstunde keine dominante mFRR-Regelrichtung vorliegt, entspricht der Ausgleichsenergiepreis exakt diesem Spotpreis.
+
+### Regelreserven: mFRR vs. aFRR
+
+Weicht die Netzfrequenz von den Ziel-50-Hz ab, setzt der finnische Übertragungsnetzbetreiber Fingrid Regelreserven ein:
+* **aFRR (*automatic Frequency Restoration Reserve*):** Automatisch anspringende Reserve, die sekundenschnell kleine Schwankungen ausgleicht.
+* **mFRR (*manual Frequency Restoration Reserve*):** Manuell aktivierte Reserve. Die mFRR-Aktivierung bestimmt die **dominante Regelrichtung** des Netzes:
+  * **Aufwärtsregelung (Up-Regulation):** Es wird mehr Erzeugung oder weniger Verbrauch benötigt. Der Preis steigt **über** den Spotpreis.
+  * **Abwärtsregelung (Down-Regulation):** Es wird weniger Erzeugung oder mehr Verbrauch benötigt. Der Preis fällt **unter** den Spotpreis.
+  * **Keine dominante Richtung (No Dominant Direction):** Das Netz ist ausgeglichen; der Preis entspricht dem Spotpreis.
+
+### Der volumengewichtete Durchschnitt
+
+Seit dem 1. Juni 2026 gilt in Finnland eine neue Abrechnungsregel: Wenn mFRR und aFRR gleichzeitig in der dominanten Richtung aktiviert werden, berechnet sich der Ausgleichsenergiepreis als **volumengewichteter Durchschnitt** der jeweiligen Aktivierungspreise:
+
+$$\text{Ausgleichspreis} = \frac{(V_{\text{mFRR}} \cdot P_{\text{mFRR}}) + (V_{\text{aFRR}} \cdot P_{\text{aFRR}})}{V_{\text{mFRR}} + V_{\text{aFRR}}}$$
+
+Wird beispielsweise mFRR mit $100\text{ MWh}$ zu $80\text{ €/MWh}$ und aFRR mit $20\text{ MWh}$ zu $50\text{ €/MWh}$ aktiviert, ergibt sich ein volumengewichteter Preis von:
+
+$$\frac{(100 \cdot 80) + (20 \cdot 50)}{100 + 20} = \frac{8000 + 1000}{120} = 75{,}00\text{ €/MWh}$$
+
+Das ungewichtete arithmetische Mittel von $65\text{ €/MWh}$ wäre mathematisch falsch, da es das Mengenverhältnis der aktivierten Leistungen ignoriert.
+
+---
+
+## 3. Gesamtarchitektur der Machine-Learning-Pipeline
+
+Aus Softwaresicht lässt sich das Prognosesystem als modulare **Batch-Inferenz-Pipeline** strukturieren. Die nachfolgende Übersicht zeigt die fünf Kernstufen der Datenverarbeitung und Modellierung:
+
+| Pipeline-Modul | Hauptaufgabe | Wichtige Eingaben & Skripte |
+| :--- | :--- | :--- |
+| **1. Data Ingestion & Availability Guard** | Filtert Rohdaten strikt nach der zeitlichen Verfügbarkeit. | `inputs.parquet`, `spot_nordpool.csv`, `rows_available_at()` |
+| **2. Feature Engineering** | Erstellt die zentrale Feature-Matrix $X$. | Lags, Rolling Aggregations, Fingrid-Prognosen (165, 246, 247), Kalenderdaten |
+| **3. Model Inferenz (6 Modelle)** | Generiert Rohprognosen für alle 8 Zielgrößen. | 3x Quantile Regressor, 1x Multiclass Classifier, 2x Binary Classifier |
+| **4. Business Rules & Postprocessing** | Stellt mathematische und logische Konsistenz sicher. | Monotonie-Prüfung ($P_{10} \le P_{50} \le P_{90}$), Wahrscheinlichkeits-Normierung |
+| **5. Exporter & Validation** | Schreibt Ergebnisse in CSV und prüft Formatvorgaben. | `forecast_backtest.csv`, `validate_submission.py`, `score.py` |
+
+### Die Verfügbarkeitsregel (`first_usable_origin_utc`)
+
+Im realen Betrieb stehen Daten erst nach einer gewissen Veröffentlichungsverzögerung bereit. Um **Data Leakage** (Vorausschauen in die Zukunft) beim Backtesting zu verhindern, enthält jede Datenzeile den Zeitstempel `first_usable_origin_utc`.
+
+Auszuführende Regel: Bei einer Prognose zum Zeitpunkt $t$ dürfen ausschließlich Datenzeilen verwendet werden, deren `first_usable_origin_utc` $\le t$ ist. Die Verletzung dieser Regel führt zu einem automatischen Score von 0 Punkten.
+
+### Warum das Modell auf Erzeugungsprognosen lernt
+
+Ein häufiges Missverständnis ist die Frage, warum das Modell auf Wetter- und Lastprognosen (Fingrid Datasets 165, 246, 247 für Wind, Solar und Verbrauch) trainiert wird, anstatt nur auf echten Messwerten.
+
+Der Grund ist die zeitliche Kausalität: Wenn das Modell am Zeitpunkt $t$ die Preise für $t+1 \dots t+10$ Stunden vorhersagen soll, existieren die echten Messwerte für diese Zukunftsstunden noch gar nicht. Zum Zeitpunkt $t$ liegen jedoch bereits die offiziellen Erzeugungsprognosen vor. Das ML-Modell lernt aus historischen Trainingsdaten, wie systematische Abweichungen zwischen Erzeugungsprognosen und Ausgleichspreisen entstehen (z. B. *„Wenn die prognostizierte Windeinspeisung stark fällt und die Last hoch ist, steigt das Risiko für Aufwärtsregelung und Preisausschläge“*).
+
+---
+
+## 4. Die 6 ML-Modelle und die 8 Zielgrößen
+
+Das Zielformat `forecast_backtest.csv` erfordert pro 15-Minuten-Schritt exakt **8 vorherzusagende Zielspalten**. Da diese Spalten unterschiedliche mathematische Wertebereiche aufweisen, werden sie auf **6 spezialisierte Modellinstanzen** aufgeteilt, die parallel auf der gemeinsamen Feature-Matrix $X$ arbeiten:
+
+* **Modellgruppe A: Quantil-Regressoren (3 Modelle für $P_{10}, P_{50}, P_{90}$)**
+  * Erzeugen die Preisprognose und das Unsicherheitsintervall in €/MWh.
+* **Modellgruppe B: Multiclass Classifier (1 Modell für `p_up`, `p_down`, `p_none`)**
+  * Erzeugt Wahrscheinlichkeiten für die mFRR-Regelrichtung, deren Summe exakt 1.0 ergibt.
+* **Modellgruppe C: Binäre Klassifikatoren (2 Modelle für `p_spike_high`, `p_spike_low`)**
+  * Erzeugen Wahrscheinlichkeiten für extreme Preisabweichungen von mehr als $\pm 50$ €/MWh gegenüber dem Spotpreis.
+
+### 1. Preisschätzung und Unsicherheit ($P_{10}, P_{50}, P_{90}$)
+
+Die Preisprognose wird über drei Quantils-Regressoren realisiert:
+
+* **$P_{50}$ (Median):** Die primäre Punktschätzung für den Ausgleichspreis.
+* **$P_{10}$ und $P_{90}$ (Unsicherheitsintervall):** Bilden die Spanne, in der sich ca. 80 % der zukünftigen tatsächlichen Preise befinden sollten.
+
+#### Warum ist der Median ($P_{50}$) dem Mittelwert überlegen?
+Strommarktpreise weisen häufig extreme Spitzen (Spikes von mehreren hundert €/MWh) oder negative Preise auf. Das klassische arithmetische Mittel reagiert extrem empfindlich auf solche Ausreißer. Der Median ist **statistisch robust** gegenüber Ausreißern und minimiert mathematisch den mittelfristigen absoluten Fehler (MAE), der in der Bewertung 30 % der Level-1-Punkte ausmacht.
+
+#### Postprocessing-Sicherheitsnetz
+Da drei unabhängige Modelle trainiert werden, kann es in seltenen Fällen zu Quantilskreuzungen kommen ($P_{10} > P_{50}$ oder $P_{50} > P_{90}$). Folgende Postprocessing-Funktion stellt die Monotonie sicher:
+
+```python
+def enforce_quantile_monotonicity(p10, p50, p90):
+    p10_clean = np.minimum(p10, p50)
+    p90_clean = np.maximum(p90, p50)
+    return p10_clean, p50, p90_clean
+```
+
+### 2. Klassifikation der Regelrichtung (`p_up`, `p_down`, `p_none`)
+
+Hierbei handelt es sich um eine **Multiclass-Klassifikation** mit drei disjunkten Zuständen:
+* `p_up`: Wahrscheinlichkeit für Aufwärtsregelung.
+* `p_down`: Wahrscheinlichkeit für Abwärtsregelung.
+* `p_none`: Wahrscheinlichkeit für keine dominante Regelrichtung.
+
+Ein einziger `LGBMClassifier` mit `objective='multiclass'` gibt pro Datenpunkt drei Wahrscheinlichkeiten aus. Über die Softmax-Funktion ist garantiert, dass ihre Summe exakt **1,0** entspricht.
+
+### 3. Klassifikation von Preisspitzen (`p_spike_high`, `p_spike_low`)
+
+Hierfür werden zwei getrennte **binäre Klassifikatoren** trainiert:
+* `p_spike_high`: Wahrscheinlichkeit, dass der Ausgleichspreis $> \text{Spotpreis} + 50\text{ €/MWh}$ liegt.
+* `p_spike_low`: Wahrscheinlichkeit, dass der Ausgleichspreis $< \text{Spotpreis} - 50\text{ €/MWh}$ liegt.
+
+Da ein Preisschritt nicht gleichzeitig extrem hoch und extrem niedrig sein kann, muss nach dem Training geprüft werden, dass `p_spike_high + p_spike_low <= 1.0` gilt.
+
+### Gegenüberstellung: Multiclass vs. Quantile Loss
+
+| Eigenschaft | **Multiclass Classification** | **Quantile Regression** |
+| :--- | :--- | :--- |
+| **Zielvariable** | Diskrete Kategorien (`up`, `down`, `none`). | Kontinuierliche Geldbeträge (€/MWh). |
+| **Ausgabe** | Wahrscheinlichkeitsvektor $[0.0, 1.0]$. | Reelle Zahlenwerte für $P_{10}, P_{50}, P_{90}$. |
+| **Verlustfunktion** | Multi-Logloss / Cross-Entropy. | Pinball Loss (Quantile Loss). |
+| **Zwangsbedingung** | Summe der Wahrscheinlichkeiten $= 1.0$. | Monotonie $P_{10} \le P_{50} \le P_{90}$. |
+
+---
+
+## 5. Algorithmen: Entscheidungsbäume und LightGBM
+
+### Das Konzept eines Entscheidungsbaums
+
+Ein Entscheidungsbaum (Decision Tree) teilt Daten durch eine Sequenz hierarchischer Ja/Nein-Fragen auf, um Vorhersagen zu treffen. Die Logik lässt sich als hierarchische Knotenstruktur beschreiben:
+
+* **Knoten 1: Ist die Windprognose $< 300\text{ MW}$?**
+  * **Ja:** Gehe zu Knoten 2.
+    * **Knoten 2: Ist die Uhrzeit $18:00\text{ UTC}$?**
+      * **Ja:** Vorhersage Ausgleichspreis $= 140\text{ €/MWh}$.
+      * **Nein:** Vorhersage Ausgleichspreis $= 75\text{ €/MWh}$.
+  * **Nein:** Gehe zu Knoten 3.
+    * **Knoten 3: Ist der Spotpreis $> 80\text{ €/MWh}$?**
+      * **Ja:** Vorhersage Ausgleichspreis $= 90\text{ €/MWh}$.
+      * **Nein:** Vorhersage Ausgleichspreis $= 40\text{ €/MWh}$.
+
+Ein einzelner Entscheidungsbaum ist leicht verständlich, neigt jedoch stark zu Overfitting (Überanpassung).
+
+### Funktionsweise von Gradient Boosting (LightGBM)
+
+LightGBM löst dieses Problem durch **Ensemble Learning**. Anstatt eines komplexen Baums werden hunderte kleine, schwache Entscheidungsbäume sequenziell nacheinander aufgebaut:
+
+1. **Baum 1** erstellt eine erste Vorhersage auf Basis des Mittelwerts.
+2. Es wird der Fehler (das **Residuum**) zwischen echter Zielvariable und Vorhersage berechnet.
+3. **Baum 2** wird darauf trainiert, genau dieses Residuum von Baum 1 vorherzusagen.
+4. **Baum 3** trainiert auf das verbleibende Residuum von Baum 1 und Baum 2, und so weiter.
+
+Die mathematische Gesamtvorhersage $y_{\text{pred}}$ berechnet sich als gewichtete Summe aller Einzelbäume mit der Lernrate $\eta$:
+
+$$y_{\text{pred}} = \text{Baum}_1(X) + \eta \cdot \text{Baum}_2(X) + \eta \cdot \text{Baum}_3(X) + \dots + \eta \cdot \text{Baum}_N(X)$$
+
+---
+
+## 6. Validierung, Baseline und Abgabe-Workflow
+
+Das Projekt folgt einer strikten zeitlichen Trennung von Trainings-, Validierungs- und Testdaten, um eine Überanpassung an historische Daten zu vermeiden.
+
+| Daten-Periode | Zeitspanne | Verwendungszweck |
+| :--- | :--- | :--- |
+| **Training Set** | 1. Juni – 4. Oktober 2026 | Training der 6 ML-Modelle. |
+| **Validation Set** | 7. September – 4. Oktober 2026 | Lokale Modell-Evaluierung und Hyperparameter-Tuning. |
+| **Test Set (Backtest)** | 5. Oktober – 1. November 2026 | Offizielle Challenge-Bewertung (673 Forecast Origins). |
+
+### Benchmark-Metriken der offiziellen Baseline
+
+Turku Energia stellt im Starter-Paket eine Naive Baseline bereit (Fortführung des letzten bekannten Ausgleichspreises). Diese dient als Mindesthürde auf der Validierungsperiode:
+
+* **Mean Absolute Error (MAE):** $66{,}20\text{ €/MWh}$ (Ziel: signifikant unterbieten).
+* **Pinball Loss (Durchschnitt):** $24{,}18$ (Ziel: kleiner ist besser).
+* **P10–P90 Coverage:** $0{,}68$ (Ziel: nahe an $0{,}80$).
+* **Brier Score (Spikes / Direction):** $0{,}1132$ / $0{,}4509$.
+
+### Die Ausführungswerkzeuge im Projekt
+
+Zur Ausführung und Überprüfung stehen drei primäre Skripte zur Verfügung:
+
+1. **`make_templates.py`:** Generiert die Zeilenstruktur für beliebige Zeiträume (z. B. für die Validierungsphase).
+2. **`score.py`:** Berechnet alle offiziellen Metriken gegen die Realdaten der Validierungsperiode:
+   ```bash
+   python score.py --submission my_validation.csv --actuals data/actuals_validation.csv --spike-margin 50 --output-dir results/my_model --baseline-summary baseline_output/validation/score/score_summary.csv
+   ```
+3. **`validate_submission.py`:** Führt vor der Abgabe eine strikte Formatprüfung der finalen 26.920 Zeilen durch:
+   ```bash
+   python validate_submission.py --backtest forecast_backtest.csv --origins forecast_origins.csv
+   ```
+
+Erst wenn der Validator **`VALIDATION PASSED`** ausgibt, ist die `forecast_backtest.csv` bereit für den Upload. Hier ist eine übersichtliche, sauber formatierte Zusammenfassung des gesamten Projekts – ohne mathematische Symbole oder Formatierungsfehler, dafür mit einer **System-Skizze**, die den genauen Datenfluss zeigt.
+
+---
+
+### 🗺️ Die System-Skizze: Wie alles zusammenhängt
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             1. DATEN-EINGABE                                │
+│  • Fingrid: Reserven (mFRR/aFRR), Wind-, Solar- &amp; Verbrauchsprognosen       │
+│  • Nord Pool: Day-Ahead Spotpreise (Basis-Referenz)                         │
+│  • ENTSO-E: Nachbarregionen (Schweden SE1/SE3, Estland) &amp; Kapazitäten       │
+└─────────────────────────────────────┬───────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         2. FEATURE ENGINEERING (X)                          │
+│  Erstellung der Eingabematrix X für jeden Zeitpunkt t:                      │
+│  • Zeit-Features (Uhrzeit, Wochentag, Schritt 1 bis 40)                     │
+│  • Lags (Preise &amp; Regelvolumina der letzten 1–4 Stunden)                    │
+│  • Erzeugungsprognosen (Wind, Solar, Last)                                  │
+│  • Strikte Einhaltung von first_usable_origin_utc (kein Data Leakage!)       │
+└─────────────────────────────────────┬───────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       3. DIE 6 MACHINE LEARNING MODELLE                     │
+│                                                                             │
+│  [ PREIS &amp; UNSICHERHEIT ] (Quantils-Regression mit LightGBMRegressor)       │
+│  ├── Modell 1: P10 (alpha = 0.1)  ──► Untere Preisgrenze (€/MWh)             │
+│  ├── Modell 2: P50 (alpha = 0.5)  ──► Preisschätzung / Median (€/MWh)        │
+│  └── Modell 3: P90 (alpha = 0.9)  ──► Obere Preisgrenze (€/MWh)              │
+│                                                                             │
+│  [ SYSTEM-REGELRICHTUNG ] (Multiclass-Klassifikation mit LGBMClassifier)    │
+│  └── Modell 4: mFRR-Richtung     ──► Wahrscheinlichkeiten: p_up, p_down,    │
+│                                       p_none (Summe = 1.0)                  │
+│                                                                             │
+│  [ PREISSPITZEN / SPIKES ] (Binäre Klassifikation mit LGBMClassifier)       │
+│  ├── Modell 5: Spike High (&gt; +50) ──► Wahrscheinlichkeit p_spike_high       │
+│  └── Modell 6: Spike Low  (&lt; -50) ──► Wahrscheinlichkeit p_spike_low        │
+└─────────────────────────────────────┬───────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      4. POSTPROCESSING &amp; PLAUSIBILITÄT                      │
+│  • Konsistenzprüfung: P10 &lt;= P50 &lt;= P90 erzwingen                           │
+│  • Wahrscheinlichkeiten auf Wertebereich 0.0 bis 1.0 beschränken            │
+└─────────────────────────────────────┬───────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         5. OUTPUT &amp; EVALUIERUNG                             │
+│  • forecast_backtest.csv (26.920 Zeilen = 673 Stunden × 40 Viertelstunden)  │
+│  • Format-Prüfung: validate_submission.py                                   │
+│  • Scoring: score.py (Baseline MAE &lt; 66,20 €/MWh, Pinball Loss &lt; 24,18)     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+```
+
+---
+
+### 📖 Die Begriffe &amp; Zusammenhänge einfach erklärt
+
+#### **1\. Strommarkt-Begriffe**
+
+* **Spotpreis (Day-Ahead):** Der Grundpreis für Strom, der täglich um 14:00 Uhr an der Börse (Nord Pool) für jede Stunde des Folgetages gehandelt wird. Er bildet deine Basis-Referenz.
+* **mFRR &amp; aFRR (Regelreserven):**
+  * **aFRR (automatisch):** Reagiert sekundenschnell auf kleine Netzschwankungen.
+  * **mFRR (manuell):** Reagiert bei größeren Abweichungen und bestimmt die dominierende **Regelrichtung** des Netzes (`p_up`, `p_down`, `p_none`).
+* **Volumengewichteter Durchschnitt:** Wird im Netz Strom aus verschiedenen Quellen benötigt (z. B. 100 MWh zu 80 € und 20 MWh zu 50 €), zählt die größere Menge mehr. Der Ausgleichspreis wird also stärker von den 80 € angezogen als von den 50 €.
+
+#### **2\. Machine Learning &amp; Modelle**
+
+* **Entscheidungsbäume (Decision Trees):** Stellen Schritt für Schritt Ja/Nein-Fragen an die Daten (z. B. *"Ist Windkraft &lt; 300 MW?"*).
+* **LightGBM (Gradient Boosting):** Trainiert Hunderte kleiner Entscheidungsbäume hintereinander. Jeder neue Baum versucht gezielt, die Vorhersagefehler der vorherigen Bäume zu korrigieren.
+* **Quantils-Regression (P10, P50, P90):**
+  * **P50 (Median):** Dein Haupt-Preisschätzer in €/MWh. Robust gegen extrem hohe oder niedrige Preisausschläge.
+  * **P10 &amp; P90:** Untere und obere Grenze, die zusammen das Unsicherheitsintervall (80 % Wahrscheinlichkeit) aufspannen.
+* **Multiclass vs. Binäre Klassifikation:**
+  * **Multiclass (Modell 4):** Berechnet 3 Wahrscheinlichkeiten gleichzeitig (`p_up`, `p_down`, `p_none`), deren Summe immer **exakt 1,0** ergibt.
+  * **Binär (Modell 5 &amp; 6):** Berechnet die Wahrscheinlichkeit für ein einzelnes Ereignis (Preisausschlag um mehr als ±50 €/MWh gegenüber dem Spotpreis).
+
+#### **3\. Warum lernt das Modell auf Erzeugungsprognosen?**
+
+Wenn du am aktuellen Zeitpunkt stehst und 10 Stunden vorausblicken willst, kennst du die echten zukünftigen Wind- und Verbrauchswerte noch nicht. Du kennst aber bereits die offiziellen **Fingrid-Prognosen**. Das Modell lernt aus der Vergangenheit, wie stark echte Preise von diesen Prognosen abweichen.
+
+---
+
+Soll ich als Nächstes ein minimalistisches Python-Skript vorbereiten, mit dem du das Laden der Daten und dein allererstes LightGBM-Modell lokal testen kannst? okay ich will das du eine komplette schöne datei die eine zusammenfassung und eine visuallliserung von alldem ist und wie es funktioniert und wie ich einfach das machen muss außerdem will ich verstehen. wie genau das zusammenhängt also wenn wir die day ahead prognose bekommen wie können wir anhand der aFFR und mFFR die sich über die 24h bis zum spotpreis verändern vorhersagen wie der spotpreis ist wenn wir nur um 14 Uhr den Strompreis für morgen bekommen und dann wie spielt die aFFR und mFFR auf unsere eigene Prediction
+
+---
+
+ich kann den exakten 24 stunden Zeitstrahl nicht sehen
+
+---
+
+nein benutzte mermaid wieder also mach es weider so schön wie vorhin und ich will einfach mal den gesamten Fluss verstehen
+
+---
+
+okay ein bisschen übersichtlicher würd ich das haben wollen vorallem die diagramme
+
+---
+
+ich würde gerne auch noch ein schönen ausführlichen zeitgraphen haben
+
+---
+
+okay pushe das mal
