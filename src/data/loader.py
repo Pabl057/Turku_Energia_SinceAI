@@ -50,10 +50,21 @@ def load_all_data(data_dir: Path | str = DEFAULT_DATA_DIR) -> tuple[pd.DataFrame
     spot_path = data_dir / "spot_nordpool.csv"
     spot = read_long(spot_path) if spot_path.exists() else None
 
+    parts = [inputs]
     if spot is not None and len(spot):
-        combined = pd.concat([inputs, spot], ignore_index=True)
-    else:
-        combined = inputs.copy()
+        parts.append(spot)
+
+    for extra_name in ("extra_inputs.parquet", "extra_inputs.csv"):
+        extra_path = data_dir / extra_name
+        if extra_path.exists():
+            extra_df = read_long(extra_path)
+            if len(extra_df):
+                parts.append(extra_df)
+            break
+
+    combined = pd.concat(parts, ignore_index=True) if len(parts) > 1 else inputs.copy()
+    if len(parts) > 1:
+        combined = combined.drop_duplicates(subset=["series_id", "timestamp_utc"], keep="last").reset_index(drop=True)
     return inputs, spot, combined
 
 

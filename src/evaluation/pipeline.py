@@ -125,7 +125,7 @@ def run_full_pipeline(data_dir: Path | str = DEFAULT_DATA_DIR) -> dict[str, Path
     test_template_path = data_dir / "sample_submission.csv"
     test_origins = read_origins(test_origins_path)
 
-    all_origins = pd.date_range("2026-06-04T00:00:00Z", test_origins.max(), freq="h", tz="UTC")
+    all_origins = pd.date_range("2026-06-01T00:00:00Z", test_origins.max(), freq="h", tz="UTC")
     print(f"2. Engineering features for {len(all_origins)} hourly origins (x 40 steps)...")
     df_all, feat_cols = build_feature_Frame(store, all_origins, include_targets=True)
     target_fu = pd.DatetimeIndex(
@@ -177,10 +177,13 @@ def run_full_pipeline(data_dir: Path | str = DEFAULT_DATA_DIR) -> dict[str, Path
         raise RuntimeError("Final forecast_backtest.csv failed validate_submission.py!")
 
     # 5. Save global feature importances for Level 2 Dashboard
+    reg_cols = latest_suite.reg_feature_cols or feat_cols
+    gain_p50_map = dict(zip(reg_cols, latest_suite.m_p50.booster_.feature_importance(importance_type="gain")))
+    split_p50_map = dict(zip(reg_cols, latest_suite.m_p50.booster_.feature_importance(importance_type="split")))
     imp_df = pd.DataFrame({
         "feature": feat_cols,
-        "gain_p50": latest_suite.m_p50.booster_.feature_importance(importance_type="gain"),
-        "split_p50": latest_suite.m_p50.booster_.feature_importance(importance_type="split"),
+        "gain_p50": [gain_p50_map.get(c, 0.0) for c in feat_cols],
+        "split_p50": [split_p50_map.get(c, 0) for c in feat_cols],
         "gain_spike_high": latest_suite.m_spike_high.booster_.feature_importance(importance_type="gain"),
         "gain_direction": latest_suite.m_dir.booster_.feature_importance(importance_type="gain"),
     }).sort_values("gain_p50", ascending=False)
