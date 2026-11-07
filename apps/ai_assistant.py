@@ -21,6 +21,12 @@ import pandas as pd
 import requests
 
 from apps.theme import format_driver_name
+from apps.ai_knowledge_base import (
+    is_german_query,
+    kb_digest_for_llm,
+    match_kb_entry,
+    render_kb_entry,
+)
 
 
 def compute_horizon_driver_weights(origin_df: pd.DataFrame, target_rows: pd.DataFrame | None = None) -> list[dict]:
@@ -47,18 +53,9 @@ def compute_horizon_driver_weights(origin_df: pd.DataFrame, target_rows: pd.Data
 
 def _is_german_query(question: str) -> bool:
     """Detect whether the user's question is written in German."""
-    q = question.lower()
-    if any(ch in q for ch in ("ä", "ö", "ü", "ß")):
-        return True
-    de_words = (
-        "ist", "das", "die", "der", "den", "dem", "ein", "eine", "was", "wie",
-        "wo", "wann", "warum", "welche", "welcher", "welches", "uhr", "preis",
-        "spotpreis", "treiber", "zeig", "erkläre", "erklären", "vorstunde",
-        "empfehlung", "webseite", "website", "bedeutet", "funktioniert", "stunde",
-        "schritt", "für", "über", "nicht", "bitte", "kannst", "mir", "gibt",
-        "aktuell", "heißt", "genau", "zeitraum", "filter", "kurve", "graph",
-    )
-    return any(re.search(rf"\b{w}\b", q) for w in de_words)
+    # Score-based EN/DE detection (shared cognates like "filter", "graph", "website"
+    # no longer force German answers to English questions).
+    return is_german_query(question)
 
 
 def _extract_requested_hour_rows(question: str, origin_df: pd.DataFrame) -> tuple[pd.DataFrame | None, str | None]:
@@ -139,10 +136,10 @@ def _build_grounded_context_prompt(
         history_txt = "\nRecent Conversation History:\n" + "\n".join(turn_lines) + "\n"
 
     lang_instruction = (
-        "WICHTIG: Antworte auf DEUTSCH, da der Nutzer auf Deutsch fragt."
+        "WICHTIG: Der Nutzer fragt auf DEUTSCH – antworte ausschließlich auf Deutsch."
         if _is_german_query(question)
-        else "IMPORTANT: Respond in ENGLISH (matching the user's language)."
-    )
+        else "IMPORTANT: The user asks in ENGLISH – respond only in English."
+    ) + " (General rule: always reply in the same language as the user's question.)"
 
     return f"""You are the intelligent AI Assistant for the Turku Energia Imbalance Price Situational Desk.
 {lang_instruction}
@@ -167,6 +164,8 @@ Complete UI & Website Context (What the user is looking at right now):
    - **Price Spikes (`Spike Probability`)**: Defined in the challenge as an imbalance price deviating by more than ±50 €/MWh from the Spot Price (`High Spike > Spot + 50 €`, `Low Spike < Spot - 50 €`). A 30% probability triggers an operational alert.
    - **mFRR Balancing Direction (`Up / Down / None`)**: Manual Frequency Restoration Reserve direction in Finland. `Up-Regulation` = power deficit in the grid (plants ramp up, imbalance price rises above Spot). `Down-Regulation` = power surplus (e.g. high wind, plants ramp down / boilers turn on, price drops below Spot). `None` = balanced grid.
    - **Model Suite & Benchmark (Tab 3)**: Dual-depth LightGBM quantile & classification suite + Conformal Calibration + TreeSHAP. Beats the official baseline on every metric: P50 MAE improved by 35% (`43.19` vs `66.20 €/MWh`), Mean Pinball Loss cut by 49% (`12.43` vs `24.18`), P10–P90 coverage hits exact `80.0%` target, Spike Brier `0.0928`, Direction Brier `0.4222`.
+Reference of EVERY UI element on the website (header, sidebar, 5 KPI cards, 4 alert banners, all charts/tables in the 4 tabs, AI controls). `<live>` = value of the current origin, see live data below:
+{kb_digest_for_llm()}
 
 Live Data Summary for Current Origin `t = {selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`:
 - Dominant Balancing Direction: {briefing['dominant_dir']} (Mean P_Up={briefing['mean_p_up']:.1%}, Mean P_Down={briefing['mean_p_down']:.1%})
@@ -399,6 +398,42 @@ def _generate_explainability_response_core(
     min_row = origin_df.loc[origin_df["p50"].idxmin()]
     hi_row = origin_df.loc[origin_df["p_spike_high"].idxmax()]
 
+    # --- Topic 0: Bilingual knowledge base covering every single UI element ---
+    kb_entry = match_kb_entry(question)
+    if kb_entry is not None:
+        lo_row = origin_df.loc[origin_df["p_spike_low"].idxmax()]
+        kb_ctx = {
+            "origin": selected_origin.strftime("%Y-%m-%d %H:%M UTC"),
+            "cutoff": cutoff_str,
+            "period": active_period,
+            "filter": active_filter,
+            "pos": origin_pos,
+            "spot_mean": spot_mean,
+            "p50_mean": p50_mean,
+            "spread": p50_mean - spot_mean,
+            "max_p_hi": float(briefing["max_p_hi"]),
+            "max_p_lo": float(briefing["max_p_lo"]),
+            "dominant_dir": briefing["dominant_dir"],
+            "mean_band": float(briefing["mean_band"]),
+            "max_abs_rev": float(briefing["max_abs_rev"]),
+            "mean_rev": float(briefing["mean_rev"]),
+            "mean_p_up": float(briefing["mean_p_up"]),
+            "mean_p_down": float(briefing["mean_p_down"]),
+            "p_none": float(origin_df["p_none"].mean()),
+            "peak_p50": float(peak_row["p50"]),
+            "peak_time": pd.Timestamp(peak_row["delivery_start_utc"]).strftime("%H:%M UTC"),
+            "hi_time": pd.Timestamp(hi_row["delivery_start_utc"]).strftime("%H:%M UTC"),
+            "lo_time": pd.Timestamp(lo_row["delivery_start_utc"]).strftime("%H:%M UTC"),
+            "cons_mean": float(origin_df["cons_da"].mean()),
+            "wind_mean": float(origin_df["wind_da"].mean()),
+            "res_mean": float(origin_df["residual_load_da"].mean()),
+            "top_drivers": ", ".join(d["driver"] for d in driver_weights[:3]) or "–",
+        }
+        return {
+            "markdown": render_kb_entry(kb_entry, is_de, kb_ctx),
+            "driver_weights": driver_weights if kb_entry["id"] in ("top_shap", "waterfall", "heatmap") else [],
+            "source": "Dashboard Copilot",
+        }
     # --- Topic A: Dataset Period / Test vs Validation Period ---
     if any(k in q_low for k in ("dataset period", "test period", "validation period", "periode", "zeitraum", "welcher datensatz", "which period", "dataset")):
         if is_de:
@@ -672,7 +707,81 @@ def _generate_explainability_response_core(
             md = f"**Operational Suggestions to Review**\n\n{rec}\n\n*Note: Decision support based on public market data — not automated plant switching commands.*"
         return {"markdown": md, "driver_weights": driver_weights, "source": "Decision Support"}
 
-    # --- Topic K: Website / Dashboard / Model / Benchmark ---
+    # --- Topic K: Buttons, Toggles, Controls & UI Elements ---
+    if any(k in q_low for k in ("button", "knopf", "toggle", "schalter", "zahnrad", "gear", "settings", "einstellung", "dark mode", "light mode", "hindsight", "json", "download", "api payload", "reasoning", "gedankengang")):
+        if is_de:
+            md = (
+                "**Alle Buttons, Schalter & Bedienelemente der Website**\n\n"
+                "* **Top-Leiste oben rechts:**\n"
+                "  * **🌙 Dark / ☀️ Light Button:** Wechselt zwischen dem *Control-Room Dark Mode* (`#07131E`) und dem *Web Light Mode* (`#FFFFFF`).\n"
+                "* **Linke Sidebar (Zeitsteuerung):**\n"
+                "  * **1. Dataset Period:** Wählt zwischen *Test Period (5. Okt – 1. Nov 2026, 673 Origins)* und *Validation Period (7. Sep – 4. Okt 2026)*.\n"
+                "  * **2. Quick Filter:** Filtert die Zeitpunkte nach *All 673 Origins*, *Spike Alert Origins Only (≥ 30%)*, *Top 20 High-Price Spikes* oder *Top 20 Low-Price Spikes*.\n"
+                "  * **◀ Previous / Next ▶:** Springt exakt eine Stunde vor oder zurück.\n"
+                "  * **🤖 Show AI Explainability Chat:** Blendet die rechte KI-Spalte ein/aus.\n"
+                "  * **🎯 Overlay Actual Prices (Hindsight):** Blendet die echten historischen Preise (grüne gepunktete Linie) im Graphen ein.\n"
+                "* **AI Assistant (Rechts):**\n"
+                "  * **⚙️ Zahnrad-Button (oben rechts):** Öffnet Modell-Auswahl (`gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`), API-Key-Feld und `🗑️ Clear Chat History`.\n"
+                "  * **✨ Quick Questions (4 Schnellfragen):** *Drivers at Peak*, *Spike Risk Summary*, *Change vs. t−1h*, *Review Actions*.\n"
+                "  * **🧠 Show Model Reasoning:** Zeigt den 4-stufigen Gedankengang (*Chain-of-Thought*) der KI über jeder Antwort an."
+            )
+        else:
+            md = (
+                "**Complete Guide to All Buttons, Toggles & Controls**\n\n"
+                "* **Top Toolbar (Top Right):**\n"
+                "  * **🌙 Dark / ☀️ Light Toggle:** Switches between *Control-Room Dark Mode* (`#07131E`) and *Web Light Mode* (`#FFFFFF`).\n"
+                "* **Left Sidebar (Time Machine):**\n"
+                "  * **1. Dataset Period:** Switches between *Test Period (5 Oct – 1 Nov 2026, 673 origins)* and *Validation Period (7 Sep – 4 Oct 2026)*.\n"
+                "  * **2. Quick Filter:** Filters origins by *All 673 Origins*, *Spike Alert Origins Only (≥ 30%)*, *Top 20 High-Price Spikes*, or *Top 20 Low-Price Spikes*.\n"
+                "  * **◀ Previous / Next ▶:** Steps 1 hour backward or forward.\n"
+                "  * **🤖 Show AI Explainability Chat:** Shows or hides the right-hand AI panel.\n"
+                "  * **🎯 Overlay Actual Prices (Hindsight):** Overlays realized ground-truth prices (green dotted line) on the fan chart.\n"
+                "* **AI Assistant (Right Panel):**\n"
+                "  * **⚙️ Gear Button (Top Right):** Opens AI model selector (`gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`), masked API key input, and `🗑️ Clear Chat History`.\n"
+                "  * **✨ Quick Questions:** 4 one-click operational prompts.\n"
+                "  * **🧠 Show Model Reasoning:** Toggles the step-by-step Chain-of-Thought reasoning trace above each answer."
+            )
+        return {"markdown": md, "driver_weights": [], "source": "Dashboard Copilot"}
+
+    # --- Topic L: All Graphs, Charts, Waterfall, Heatmap, Birnbaum & XAI ---
+    if any(k in q_low for k in ("graph", "chart", "diagramm", "kurve", "waterfall", "wasserfall", "heatmap", "birnbaum", "xai", "shap", "scatter", "ablation", "wilcoxon", "t-test", "tab")):
+        if is_de:
+            md = (
+                "**Alle Graphen, Tabs & XAI-Visualisierungen der Website**\n\n"
+                "1. **Tab 1 – 📈 10-Hour Forecast & Risk Monitor:**\n"
+                "   * **Probabilistic 10h Fan Chart:** Zeigt 6h Vergangenheit links von `NOW` und 40 Viertelstunden (+10h) rechts mit `P50`-Median (türkis), `80% Konfidenzband (P10–P90)`, `Spotpreis` (orange gestrichelt) und `Vorstunden-Prognose (t−1h)`.\n"
+                "   * **2 XAI-Erklärkarten:** Erklären für den Peak-Step, wie `P50 = Spot + AI Spread` entsteht und warum das `P10–P90`-Band so breit ist.\n"
+                "   * **Price Spike Probability Chart:** Balkendiagramm für `P(High Spike > Spot+50€)` (Berry-Rot) und `P(Low Spike < Spot−50€)` (Pflaume) mit 30%-Warnschwelle.\n"
+                "   * **mFRR Balancing Direction Chart:** Gestapeltes Flächendiagramm für `Up` (Defizit), `Down` (Überschuss) und `None`.\n"
+                "2. **Tab 2 – 🔍 Physical Grid Drivers & SHAP Explainability:**\n"
+                "   * **Price Waterfall & Uncertainty Breakdown:** Wasserfall-Zerlegung von Spot → P50 sowie der 4 Unsicherheitsquellen für jeden wählbaren Step 1–40.\n"
+                "   * **Physical Grid Trajectory & Horizon SHAP:** Verlauf von Verbrauch, Wind und Residuallast (MW) + Top-SHAP-Treiber.\n"
+                "   * **Advanced XAI Expander:** 40-Step Driver-Heatmap, Birnbaum-Zuverlässigkeitsanalyse (`I_B`, `I_CR`, `I_FV`) und globales LightGBM Information Gain.\n"
+                "3. **Tab 3 – 🎯 Hindsight Benchmark vs. Official Baseline:**\n"
+                "   * Benchmark-Tabelle (`MAE 43,19 €` vs. `66,20 €`), Horizon-MAE-Kurve, Ablationsstudie (Heliyon Table 3), t-Test/Wilcoxon-Signifikanztest (`p < 0.0001`) und 45°-Kalibrierungs-Scatterplot.\n"
+                "4. **Tab 4 – 🔌 40-Step Data Table & JSON API:**\n"
+                "   * Komplette 40-Schritte-Tabelle und JSON-API-Download."
+            )
+        else:
+            md = (
+                "**Complete Guide to All Charts, Tabs & XAI Visuals**\n\n"
+                "1. **Tab 1 – 📈 10-Hour Forecast & Risk Monitor:**\n"
+                "   * **Probabilistic 10h Fan Chart:** 6h realized history left of `NOW` and 40 quarter-hour steps (+10h) right of `NOW` (`P50` median, `P10–P90` 80% band, `Spot Price`, `t−1h revision`).\n"
+                "   * **2 XAI Summary Cards:** Decompose `Spot + AI Spread = P50` and the 4 sources of `P10–P90` width.\n"
+                "   * **Price Spike Probability Chart:** Bar chart of `P(High Spike > Spot+50€)` and `P(Low Spike < Spot−50€)` against the 30% alert line.\n"
+                "   * **mFRR Balancing Direction Chart:** 100% stacked area chart for `Up` (Deficit), `Down` (Surplus), and `None`.\n"
+                "2. **Tab 2 – 🔍 Physical Grid Drivers & SHAP Explainability:**\n"
+                "   * **Price Waterfall & Uncertainty Breakdown Charts:** Step-by-step waterfall from Spot to P50 and uncertainty width decomposition for any selected Step 1–40.\n"
+                "   * **Physical Grid Trajectory & Horizon SHAP:** Load, Wind, and Residual Load (MW) + Top SHAP drivers.\n"
+                "   * **Advanced XAI Expander:** 40-Step Temporal Driver Heatmap, Birnbaum Reliability Table & Chart (`I_B`, `I_CR`, `I_FV`), and Global LightGBM Gain.\n"
+                "3. **Tab 3 – 🎯 Hindsight Benchmark vs. Official Baseline:**\n"
+                "   * Benchmark comparison (`MAE 43.19 €` vs. `66.20 €`), Horizon MAE curve, Progressive Ablation Study, Paired t-Test & Wilcoxon Signed-Rank Test (`p < 0.0001`), and 45° Calibration Scatter.\n"
+                "4. **Tab 4 – 🔌 40-Step Data Table & JSON API:**\n"
+                "   * Full 40-step table and downloadable REST JSON payload."
+            )
+        return {"markdown": md, "driver_weights": driver_weights, "source": "Dashboard Copilot"}
+
+    # --- Topic M: Website / Dashboard / Model / Benchmark ---
     if any(k in q_low for k in ("website", "webseite", "dashboard", "model", "modell", "baseline", "accuracy", "mae", "pinball", "brier", "benchmark", "wie funktioniert", "how does", "what is this", "erklär")):
         if is_de:
             md = (
