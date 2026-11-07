@@ -1,0 +1,50 @@
+{
+  "cli_version": "0.13.1",
+  "checkpoint_id": "01M6VVX51P641RHV8E400S30C5",
+  "session_id": "8eebf1e6-87ea-458f-861c-bb16b9cd3ddd",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T20:41:23.624643Z",
+  "branch": "feat/xai",
+  "checkpoints_count": 21,
+  "save_step_count": 21,
+  "files_touched": [
+    "apps/charts.py",
+    "apps/dashboard.py",
+    "apps/theme.py",
+    "docs/ARCHITECTURE.md",
+    "docs/DATA_MODELS_LICENSES.md",
+    "docs/EVALUATION_REPORT.md",
+    "docs/OVERVIEW.md",
+    "docs/PROJECT_GUIDE.md",
+    "docs/index.md",
+    "skills-lock.json",
+    "src/evaluation/xai_metrics.py"
+  ],
+  "agent": "Antigravity",
+  "model": "",
+  "turn_id": "57889cf8acaf",
+  "token_usage": {
+    "input_tokens": 310486,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 16303394,
+    "output_tokens": 163892,
+    "api_call_count": 111
+  },
+  "redaction": {
+    "replacements": 13,
+    "layers": {
+      "betterleaks": 1,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 12,
+      "credentialed_uri": 0,
+      "entropy": 1,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 70
+  }
+}

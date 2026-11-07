@@ -1,0 +1,49 @@
+{
+  "cli_version": "0.13.1",
+  "checkpoint_id": "01M6VVX51P641RHV8E400S30C5",
+  "strategy": "manual-commit",
+  "branch": "feat/xai",
+  "checkpoints_count": 21,
+  "files_touched": [
+    "apps/charts.py",
+    "apps/dashboard.py",
+    "apps/theme.py",
+    "docs/ARCHITECTURE.md",
+    "docs/DATA_MODELS_LICENSES.md",
+    "docs/EVALUATION_REPORT.md",
+    "docs/OVERVIEW.md",
+    "docs/PROJECT_GUIDE.md",
+    "docs/index.md",
+    "skills-lock.json",
+    "src/evaluation/xai_metrics.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 310486,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 16303394,
+    "output_tokens": 163892,
+    "api_call_count": 111
+  },
+  "redaction": {
+    "replacements": 13,
+    "layers": {
+      "betterleaks": 1,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 12,
+      "credentialed_uri": 0,
+      "entropy": 1,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
