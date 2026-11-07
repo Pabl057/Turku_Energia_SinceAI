@@ -134,10 +134,18 @@ class ImbalanceForecasterSuite:
             verbose=-1,
         )
 
-        # Quantile Regressors (trained on spread = y_imbalance_price - spot_eff)
-        self.model_p10 = lgb.LGBMRegressor(objective="quantile", alpha=0.10, **common_reg_params)
+        # Tail Quantile Regressors (lighter leaf regularization so tail quantiles expand naturally in volatile hours)
+        tail_reg_params = {
+            **common_reg_params,
+            "num_leaves": 42,
+            "max_depth": 7,
+            "min_child_samples": 30,
+            "reg_alpha": 0.2,
+            "reg_lambda": 1.0,
+        }
+        self.model_p10 = lgb.LGBMRegressor(objective="quantile", alpha=0.10, **tail_reg_params)
         self.model_p50 = lgb.LGBMRegressor(objective="quantile", alpha=0.50, **common_reg_params)
-        self.model_p90 = lgb.LGBMRegressor(objective="quantile", alpha=0.90, **common_reg_params)
+        self.model_p90 = lgb.LGBMRegressor(objective="quantile", alpha=0.90, **tail_reg_params)
 
         # Direct price P50 model
         self.model_p50_direct = lgb.LGBMRegressor(objective="quantile", alpha=0.50, **common_reg_params)
@@ -171,11 +179,11 @@ class ImbalanceForecasterSuite:
         self.model_spike_high = lgb.LGBMClassifier(objective="binary", **common_clf_params)
         self.model_spike_low = lgb.LGBMClassifier(objective="binary", **common_clf_params)
 
-        # Out-of-time Split Conformal Calibration parameters (target ~80% coverage & minimum Pinball loss)
-        self.conformal_scale_lo: float = 1.32
-        self.conformal_scale_hi: float = 1.32
-        self.conformal_shift_lo: float = -3.5
-        self.conformal_shift_hi: float = 10.5
+        # Out-of-time Split Conformal Dispersion Scaling parameters (target ~80% coverage & minimum Pinball loss)
+        self.conformal_scale_lo: float = 1.60
+        self.conformal_scale_hi: float = 1.25
+        self.conformal_shift_lo: float = -2.0
+        self.conformal_shift_hi: float = 8.0
 
         # Historical base rates for Empirical Bayes Brier calibration (computed strictly on train_df)
         self.prior_up: float = 0.3526
@@ -313,12 +321,37 @@ class ImbalanceForecasterSuite:
         p_down = alpha_dir * raw_down + (1.0 - alpha_dir) * self.prior_down
         p_none = alpha_dir * raw_none + (1.0 - alpha_dir) * self.prior_none
 
-        # Spike probabilities with gentle Brier calibration shrinkage (alpha=0.86)
+        # Spike probabilities: Binary Classifier + Two-Piece Quantile Tail Probability + Brier Shrinkage
         raw_sh = self.model_spike_high.predict_proba(X)[:, 1]
         raw_sl = self.model_spike_low.predict_proba(X)[:, 1]
-        alpha_spike = np.where(steps <= 4, 0.92, 0.85)
-        p_spike_high = alpha_spike * raw_sh + (1.0 - alpha_spike) * self.prior_spike_high
-        p_spike_low = alpha_spike * raw_sl + (1.0 - alpha_spike) * self.prior_spike_low
+
+        # Analytical Two-Piece Exponential Quantile Tail Probabilities P(Y > spot + 50) & P(Y < spot - 50)
+        ln5 = float(np.log(5.0))  # 0.50 * exp(-ln(5) * 1.0) == 0.10 at P90 / P10
+        sigma_hi = np.maximum(p90 - p50, 3.0)
+        sigma_lo = np.maximum(p50 - p10, 3.0)
+
+        thresh_hi = spot_eff + 50.0
+        dist_hi = thresh_hi - p50
+        p_tail_high = np.where(
+            dist_hi >= 0.0,
+            0.50 * np.exp(-ln5 * np.minimum(dist_hi / sigma_hi, 10.0)),
+            1.0 - 0.50 * np.exp(-ln5 * np.minimum(-dist_hi / sigma_lo, 10.0)),
+        )
+
+        thresh_lo = spot_eff - 50.0
+        dist_lo = p50 - thresh_lo
+        p_tail_low = np.where(
+            dist_lo >= 0.0,
+            0.50 * np.exp(-ln5 * np.minimum(dist_lo / sigma_lo, 10.0)),
+            1.0 - 0.50 * np.exp(-ln5 * np.minimum(-dist_lo / sigma_hi, 10.0)),
+        )
+
+        blended_sh = 0.80 * raw_sh + 0.20 * p_tail_high
+        blended_sl = 0.80 * raw_sl + 0.20 * p_tail_low
+
+        alpha_spike = np.where(steps <= 4, 0.92, 0.86)
+        p_spike_high = alpha_spike * blended_sh + (1.0 - alpha_spike) * self.prior_spike_high
+        p_spike_low = alpha_spike * blended_sl + (1.0 - alpha_spike) * self.prior_spike_low
 
         top_drivers = (
             self.compute_top_drivers(X, top_k=3)

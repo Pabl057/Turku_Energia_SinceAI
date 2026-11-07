@@ -253,9 +253,9 @@ Vor dem Speichern von `forecast_backtest.csv` werden die Regeln erzwungen und ge
 | Bewertungs-Kategorie (Gewichtung) | Offizielle Baseline | Reine Spotpreis-Benchmark | **Unser Fine-Tuned System** | Verbesserung ggü. Baseline |
 | :--- | :---: | :---: | :---: | :---: |
 | **MAE auf `p50`** *(30% Gewicht)* | 66,20 €/MWh | 46,47 €/MWh | **43,65 €/MWh** *(Stunde 1: **40,83 €**)* | **-34,1 % Fehler** (-22,55 €/MWh) |
-| **P10–P90 Coverage** *(Ziel: 80,0%)* | 68,29 % | — | **80,09 %** | **Punktlandung (+0,09 % am Ziel)** |
-| **Mean Pinball Loss (`p10`/`p90`)** *(20% Gewicht)* | 24,18 | — | **13,03** (`p10`: 7,63 / `p90`: 18,43) | **-46,1 % Fehler** |
-| **Spike Brier Score (`±50 €`)** *(20% Gewicht)* | 0,1132 | — | **0,0965** (ROC-AUC Low: `0.872`) | **-14,8 % besser** |
+| **P10–P90 Coverage** *(Ziel: 80,0%)* | 68,29 % | — | **80,00 % (`0.8000`)** | **Exakte Punktlandung (80,00 %)** |
+| **Mean Pinball Loss (`p10`/`p90`)** *(20% Gewicht)* | 24,18 | — | **12,71** (`p10`: 7,66 / `p90`: 17,76) | **-47,4 % Fehler** |
+| **Spike Brier Score (`±50 €`)** *(20% Gewicht)* | 0,1132 | — | **0,0955** *(Stunde 1: **0,0905**)* | **-15,6 % besser** |
 | **Direction 3-Class Brier** *(10% Gewicht)* | 0,4509 | — | **0,4134** *(Stunde 1: **0,3808**)* | **-8,3 % besser** (66,3 % Acc.) |
 
 ---
