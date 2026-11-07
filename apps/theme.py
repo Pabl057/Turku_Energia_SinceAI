@@ -142,101 +142,101 @@ def inject_brand_css(dark_mode: bool = True) -> str:
     """Return full CSS stylesheet implementing Apple Design (SKILL.md) + Turku Energia accents in Dark or Light mode."""
     if dark_mode:
         theme_vars = """
-        --te-orange: #FF9F0A;
-        --te-orange-hover: #FFB340;
-        --te-orange-light: rgba(255, 159, 10, 0.15);
-        --te-orange-soft: rgba(255, 159, 10, 0.32);
-        --te-bg-app: #090C12;
-        --te-bg-surface: rgba(24, 30, 42, 0.72);
-        --te-bg-elevated: rgba(38, 47, 64, 0.65);
-        --te-bg-sidebar: rgba(14, 18, 26, 0.85);
-        --te-bg-hero: linear-gradient(135deg, rgba(28, 36, 52, 0.82) 0%, rgba(18, 24, 36, 0.88) 60%, rgba(42, 33, 24, 0.78) 100%);
-        --te-border: rgba(255, 255, 255, 0.09);
-        --te-border-subtle: rgba(255, 255, 255, 0.06);
+        --te-orange: #F59B00;
+        --te-orange-hover: #FFA81A;
+        --te-orange-light: rgba(245, 155, 0, 0.16);
+        --te-orange-soft: rgba(245, 155, 0, 0.38);
+        --te-bg-app: #07131E;
+        --te-bg-surface: #0D1E2E;
+        --te-bg-elevated: #12283C;
+        --te-bg-sidebar: linear-gradient(180deg, #0A1927 0%, #07131E 100%);
+        --te-bg-hero: linear-gradient(135deg, #0D2235 0%, #0A1928 58%, #1F1D18 100%);
+        --te-border: #1E3F5E;
+        --te-border-subtle: #152F47;
         --te-ice: #B4DCE6;
-        --te-turquoise: #5AC8FA;
-        --te-lime: #30D158;
-        --te-berry: #FF375F;
-        --te-navy: #0A84FF;
-        --te-plum: #BF5AF2;
-        --te-yellow: #FFD60A;
-        --te-stone: #2C2C2E;
-        --te-gray: #98989D;
-        --te-heading-color: #F5F5F7;
-        --te-text: #E5E5EA;
-        --te-text-muted: #98989D;
+        --te-turquoise: #46BEDC;
+        --te-lime: #AAC800;
+        --te-berry: #E6508C;
+        --te-navy: #0F4B73;
+        --te-plum: #C85AB2;
+        --te-yellow: #FFD719;
+        --te-stone: #233B52;
+        --te-gray: #92AFC4;
+        --te-heading-color: #FFFFFF;
+        --te-text: #F0F6FA;
+        --te-text-muted: #9CB8CE;
         --te-kpi-value-color: #FFFFFF;
-        --te-delta-bg: rgba(90, 200, 250, 0.14);
-        --te-delta-text: #70D7FF;
-        --te-delta-ok-bg: rgba(48, 209, 88, 0.16);
-        --te-delta-ok-text: #30D158;
-        --te-alert-high-bg: rgba(255, 55, 95, 0.12);
-        --te-alert-high-border: rgba(255, 55, 95, 0.35);
-        --te-alert-low-bg: rgba(191, 90, 242, 0.12);
-        --te-alert-low-border: rgba(191, 90, 242, 0.35);
-        --te-alert-rev-bg: rgba(255, 159, 10, 0.12);
-        --te-alert-rev-border: rgba(255, 159, 10, 0.35);
-        --te-alert-norm-bg: rgba(48, 209, 88, 0.10);
-        --te-alert-norm-border: rgba(48, 209, 88, 0.30);
-        --te-msg-user-bg: linear-gradient(135deg, #0A84FF 0%, #0066CC 100%);
-        --te-msg-ai-bg: rgba(38, 47, 64, 0.65);
-        --te-bar-track: rgba(255, 255, 255, 0.08);
-        --te-shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.2);
-        --te-shadow-md: 0 16px 40px rgba(0, 0, 0, 0.42), 0 2px 6px rgba(0, 0, 0, 0.25);
+        --te-delta-bg: rgba(70, 190, 220, 0.14);
+        --te-delta-text: #CFEAF2;
+        --te-delta-ok-bg: rgba(170, 200, 0, 0.18);
+        --te-delta-ok-text: #D4F04D;
+        --te-alert-high-bg: linear-gradient(90deg, rgba(230, 80, 140, 0.18) 0%, rgba(13, 30, 46, 0.95) 100%);
+        --te-alert-high-border: rgba(230, 80, 140, 0.45);
+        --te-alert-low-bg: linear-gradient(90deg, rgba(160, 60, 140, 0.22) 0%, rgba(13, 30, 46, 0.95) 100%);
+        --te-alert-low-border: rgba(200, 90, 178, 0.45);
+        --te-alert-rev-bg: linear-gradient(90deg, rgba(245, 155, 0, 0.18) 0%, rgba(13, 30, 46, 0.95) 100%);
+        --te-alert-rev-border: rgba(245, 155, 0, 0.45);
+        --te-alert-norm-bg: linear-gradient(90deg, rgba(170, 200, 0, 0.15) 0%, rgba(13, 30, 46, 0.95) 100%);
+        --te-alert-norm-border: rgba(170, 200, 0, 0.42);
+        --te-msg-user-bg: linear-gradient(135deg, #0F4B73 0%, #145D8D 100%);
+        --te-msg-ai-bg: #102437;
+        --te-bar-track: #17324A;
+        --te-shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.35);
+        --te-shadow-md: 0 10px 28px rgba(0, 0, 0, 0.5);
         """
     else:
         theme_vars = """
         --te-orange: #F59B00;
         --te-orange-hover: #DF8C00;
-        --te-orange-light: rgba(245, 155, 0, 0.12);
-        --te-orange-soft: rgba(245, 155, 0, 0.25);
-        --te-bg-app: #F5F5F7;
-        --te-bg-surface: rgba(255, 255, 255, 0.82);
-        --te-bg-elevated: rgba(242, 242, 247, 0.85);
-        --te-bg-sidebar: rgba(255, 255, 255, 0.78);
-        --te-bg-hero: linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(242, 246, 252, 0.88) 65%, rgba(255, 248, 235, 0.9) 100%);
-        --te-border: rgba(0, 0, 0, 0.07);
-        --te-border-subtle: rgba(0, 0, 0, 0.045);
+        --te-orange-light: #FFF4E0;
+        --te-orange-soft: #FDE6BE;
+        --te-bg-app: #FFFFFF;
+        --te-bg-surface: #EAF7FB;
+        --te-bg-elevated: #FFFFFF;
+        --te-bg-sidebar: linear-gradient(180deg, #EAF7FB 0%, #FFFFFF 100%);
+        --te-bg-hero: linear-gradient(135deg, #EAF7FB 0%, #FFFFFF 62%, #FFF8EB 100%);
+        --te-border: #B4DCE6;
+        --te-border-subtle: #D5ECF2;
         --te-ice: #B4DCE6;
-        --te-turquoise: #007AFF;
-        --te-lime: #28CD41;
-        --te-berry: #FF2D55;
-        --te-navy: #1D1D1F;
-        --te-plum: #AF52DE;
-        --te-yellow: #FFCC00;
-        --te-stone: #E5E5EA;
-        --te-gray: #86868B;
-        --te-heading-color: #1D1D1F;
-        --te-text: #1D1D1F;
-        --te-text-muted: #6E6E73;
-        --te-kpi-value-color: #1D1D1F;
-        --te-delta-bg: rgba(0, 122, 255, 0.09);
-        --te-delta-text: #0066CC;
-        --te-delta-ok-bg: rgba(40, 205, 65, 0.14);
-        --te-delta-ok-text: #1D7A2B;
-        --te-alert-high-bg: rgba(255, 45, 85, 0.08);
-        --te-alert-high-border: rgba(255, 45, 85, 0.25);
-        --te-alert-low-bg: rgba(175, 82, 222, 0.08);
-        --te-alert-low-border: rgba(175, 82, 222, 0.25);
-        --te-alert-rev-bg: rgba(245, 155, 0, 0.10);
-        --te-alert-rev-border: rgba(245, 155, 0, 0.30);
-        --te-alert-norm-bg: rgba(40, 205, 65, 0.08);
-        --te-alert-norm-border: rgba(40, 205, 65, 0.25);
-        --te-msg-user-bg: linear-gradient(135deg, #007AFF 0%, #0051D5 100%);
-        --te-msg-ai-bg: rgba(242, 242, 247, 0.9);
-        --te-bar-track: rgba(0, 0, 0, 0.06);
-        --te-shadow-sm: 0 4px 20px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
-        --te-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+        --te-turquoise: #46BEDC;
+        --te-lime: #AAC800;
+        --te-berry: #E6508C;
+        --te-navy: #0F4B73;
+        --te-plum: #A03C8C;
+        --te-yellow: #FFD719;
+        --te-stone: #E6E1DC;
+        --te-gray: #5A7184;
+        --te-heading-color: #0F4B73;
+        --te-text: #0F2942;
+        --te-text-muted: #3B5975;
+        --te-kpi-value-color: #0F4B73;
+        --te-delta-bg: rgba(255, 255, 255, 0.85);
+        --te-delta-text: #2B4C66;
+        --te-delta-ok-bg: #EBF5D6;
+        --te-delta-ok-text: #3D5200;
+        --te-alert-high-bg: #FFF5F8;
+        --te-alert-high-border: #F5C2D7;
+        --te-alert-low-bg: #FAF5F9;
+        --te-alert-low-border: #E2C2DA;
+        --te-alert-rev-bg: #FFF9EB;
+        --te-alert-rev-border: #FDE6BE;
+        --te-alert-norm-bg: #F4FAE8;
+        --te-alert-norm-border: #D7E8B5;
+        --te-msg-user-bg: #0F4B73;
+        --te-msg-ai-bg: #EAF7FB;
+        --te-bar-track: #D5ECF2;
+        --te-shadow-sm: 0 2px 10px rgba(15, 75, 115, 0.06);
+        --te-shadow-md: 0 8px 24px rgba(15, 75, 115, 0.11);
         """
 
     return f"""
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Fira+Sans+Extra+Condensed:wght@600;700;800&family=Fira+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Inter:wght@400;500;600;700;800&display=swap');
 
       :root {{
         {theme_vars}
-        --te-font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', system-ui, sans-serif;
-        --te-radius-card: 20px;
+        --te-font-sans: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+        --te-radius-card: 12px 26px 12px 12px;
         --te-radius-inner: 12px;
         --te-spring: cubic-bezier(0.22, 1, 0.36, 1);
         --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -406,7 +406,7 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         padding-bottom: 1.25rem !important;
       }}
 
-      /* Sleek Sidebar Collapse (<<) & Expand (>>) Buttons */
+      /* Sleek Sidebar Collapse (<<) & Expand (>>) Buttons — High-Contrast in both Dark & Light Mode */
       [data-testid="stSidebarCollapseButton"] button,
       [data-testid="stExpandSidebarButton"],
       [data-testid="collapsedControl"] button {{
@@ -414,14 +414,27 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         height: 34px !important;
         min-height: 34px !important;
         border-radius: 10px !important;
-        background: var(--te-bg-surface) !important;
-        border: 1px solid var(--te-border) !important;
-        color: var(--te-turquoise) !important;
+        background: {"rgba(30, 38, 54, 0.9)" if dark_mode else "#FFFFFF"} !important;
+        border: 1px solid {"rgba(255, 255, 255, 0.16)" if dark_mode else "#C7C7CC"} !important;
+        color: {"#E5E5EA" if dark_mode else "#2C2C2E"} !important;
         display: inline-flex !important;
         align-items: center !important;
         justify-content: center !important;
         box-shadow: var(--te-shadow-sm) !important;
         transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out), border-color 160ms var(--ease-out), color 160ms var(--ease-out) !important;
+      }}
+
+      [data-testid="stSidebarCollapseButton"] button svg,
+      [data-testid="stSidebarCollapseButton"] button span,
+      [data-testid="stExpandSidebarButton"] svg,
+      [data-testid="stExpandSidebarButton"] span,
+      [data-testid="collapsedControl"] button svg,
+      [data-testid="collapsedControl"] button span,
+      span[data-testid="stMainMenu"] button,
+      span[data-testid="stMainMenu"] button svg {{
+        color: {"#E5E5EA" if dark_mode else "#2C2C2E"} !important;
+        fill: {"#E5E5EA" if dark_mode else "#2C2C2E"} !important;
+        opacity: 1 !important;
       }}
 
       @media (hover: hover) and (pointer: fine) {{
@@ -432,6 +445,15 @@ def inject_brand_css(dark_mode: bool = True) -> str:
           background: var(--te-orange-light) !important;
           color: var(--te-orange) !important;
           transform: scale(1.04) !important;
+        }}
+        [data-testid="stSidebarCollapseButton"] button:hover svg,
+        [data-testid="stSidebarCollapseButton"] button:hover span,
+        [data-testid="stExpandSidebarButton"]:hover svg,
+        [data-testid="stExpandSidebarButton"]:hover span,
+        [data-testid="collapsedControl"] button:hover svg,
+        [data-testid="collapsedControl"] button:hover span {{
+          color: var(--te-orange) !important;
+          fill: var(--te-orange) !important;
         }}
       }}
 
@@ -596,33 +618,31 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         margin-bottom: 0.4rem !important;
       }}
 
-      /* Hero Banner — Lead Element (0ms entrance, 240ms strong ease-out) */
+      /* Hero Banner with Organic Wave Shape (Pages 3, 20, 47, 48) */
       .te-hero-banner {{
         position: relative;
         overflow: hidden;
         background: var(--te-bg-hero);
-        backdrop-filter: var(--te-glass-blur);
-        -webkit-backdrop-filter: var(--te-glass-blur);
         border: 1px solid var(--te-border);
-        border-radius: 22px;
-        padding: 1.35rem 1.75rem;
-        margin-bottom: 1.25rem;
-        box-shadow: var(--te-specular-top), var(--te-shadow-sm);
+        border-left: 5px solid var(--te-orange);
+        border-radius: 14px 36px 14px 14px;
+        padding: 1.3rem 1.75rem;
+        margin-bottom: 1.2rem;
+        box-shadow: var(--te-shadow-sm);
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 1.5rem;
-        animation: teCardEnter 240ms var(--ease-out) both;
       }}
 
       .te-hero-banner::before {{
         content: "";
         position: absolute;
-        right: -40px;
-        top: -80px;
-        width: 320px;
-        height: 320px;
-        background: radial-gradient(circle, rgba(255, 159, 10, 0.14) 0%, rgba(90, 200, 250, 0.08) 50%, transparent 72%);
+        right: -50px;
+        top: -90px;
+        width: 300px;
+        height: 300px;
+        background: radial-gradient(circle, rgba(245, 155, 0, 0.16) 0%, rgba(70, 190, 220, 0.06) 50%, transparent 72%);
         border-radius: 50%;
         pointer-events: none;
       }}
@@ -635,13 +655,14 @@ def inject_brand_css(dark_mode: bool = True) -> str:
       }}
 
       .te-hero-title {{
-        font-family: var(--te-font-sans) !important;
-        font-size: clamp(1.55rem, 2.2vw, 1.95rem);
-        font-weight: 700 !important;
-        letter-spacing: -0.03em !important;
+        font-family: 'Fira Sans Extra Condensed', sans-serif !important;
+        font-size: 1.9rem !important;
+        font-weight: 800 !important;
         color: var(--te-heading-color) !important;
-        line-height: 1.08;
-        margin: 0 0 0.28rem 0;
+        line-height: 1.08 !important;
+        margin: 0 0 0.28rem 0 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.01em !important;
       }}
 
       .te-hero-title span.te-dot {{
@@ -649,34 +670,35 @@ def inject_brand_css(dark_mode: bool = True) -> str:
       }}
 
       .te-hero-subtitle {{
-        font-size: 0.92rem;
+        font-size: 0.93rem;
         color: var(--te-text-muted) !important;
         margin: 0;
         font-weight: 400;
-        letter-spacing: -0.008em;
       }}
 
       .te-slogan-badge {{
-        font-family: var(--te-font-sans);
-        font-size: 0.88rem;
-        font-weight: 500;
+        font-family: 'Newsreader', 'Century Schoolbook', Georgia, serif;
+        font-size: 0.95rem;
+        font-style: italic;
         color: var(--te-heading-color);
-        background: var(--te-bg-elevated);
+        background: var(--te-bg-surface);
         border: 1px solid var(--te-border);
-        padding: 0.6rem 1.1rem;
-        border-radius: 14px;
+        border-left: 4px solid var(--te-orange);
+        padding: 0.55rem 1.05rem;
+        border-radius: 8px 18px 8px 8px;
         white-space: nowrap;
-        box-shadow: var(--te-specular-top);
+        box-shadow: var(--te-shadow-sm);
         z-index: 1;
         text-align: right;
       }}
 
       .te-slogan-sub {{
         display: block;
-        font-family: var(--te-font-sans);
+        font-family: 'Fira Sans', sans-serif;
+        font-style: normal;
         font-size: 0.72rem;
         color: var(--te-text-muted);
-        margin-top: 0.14rem;
+        margin-top: 0.12rem;
       }}
 
       /* KPI Cards — Apple Health / Apple Stocks Bento Widgets with Non-Uniform Stagger (<300ms) */
@@ -771,89 +793,77 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         margin-bottom: 0.48rem;
       }}
 
+      /* KPI Tag Badges — Strictly Sharp Rectangular Boxes (border-radius: 0) */
       .te-kpi-delta {{
-        font-size: 0.76rem;
+        font-size: 0.75rem;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
         color: var(--te-delta-text);
         display: inline-flex;
         align-items: center;
         gap: 0.3rem;
-        padding: 0.18rem 0.6rem;
-        border-radius: 99px;
+        padding: 0.24rem 0.62rem;
+        border-radius: 0 !important;
         background: var(--te-delta-bg);
+        border: 1px solid {"rgba(90, 200, 250, 0.28)" if dark_mode else "rgba(0, 102, 204, 0.22)"};
       }}
 
       .te-kpi-delta.warn {{
-        background: rgba(255, 55, 95, 0.18);
+        background: rgba(255, 55, 95, 0.16);
         color: var(--te-berry) !important;
-        border: 1px solid rgba(255, 55, 95, 0.35);
+        border: 1px solid rgba(255, 55, 95, 0.42);
+        border-radius: 0 !important;
         font-weight: 600;
       }}
 
       .te-kpi-delta.ok {{
         background: var(--te-delta-ok-bg);
         color: var(--te-delta-ok-text);
+        border: 1px solid {"rgba(48, 209, 88, 0.35)" if dark_mode else "rgba(29, 122, 43, 0.30)"};
+        border-radius: 0 !important;
         font-weight: 600;
       }}
 
-      /* Situational Alert Banner — Apple Notification Pill Banner */
+      /* Situational Alert Banner (Original Clean Open Banner) */
       .te-alert-card {{
-        border-radius: 18px;
-        padding: 1rem 1.3rem;
-        margin-bottom: 1rem;
+        border-radius: 12px 24px 12px 12px;
+        padding: 1rem 1.35rem;
+        margin-bottom: 0.9rem;
         border: 1px solid var(--te-border);
-        backdrop-filter: var(--te-glass-blur);
-        -webkit-backdrop-filter: var(--te-glass-blur);
-        box-shadow: var(--te-specular-top), var(--te-shadow-sm);
-        transition: transform 180ms var(--ease-out), border-color 180ms var(--ease-out), box-shadow 180ms var(--ease-out);
-        animation: teCardEnter 240ms var(--ease-out) 60ms both;
+        border-left-width: 6px;
+        box-shadow: var(--te-shadow-sm);
+        transition: all 0.2s ease;
       }}
 
       .te-alert-card.level-HIGH {{
         background: var(--te-alert-high-bg);
         border-color: var(--te-alert-high-border);
+        border-left-color: var(--te-berry);
       }}
 
       .te-alert-card.level-LOW_SPIKE {{
         background: var(--te-alert-low-bg);
         border-color: var(--te-alert-low-border);
+        border-left-color: var(--te-plum);
       }}
 
       .te-alert-card.level-REVISION {{
         background: var(--te-alert-rev-bg);
         border-color: var(--te-alert-rev-border);
+        border-left-color: var(--te-orange);
       }}
 
       .te-alert-card.level-NORMAL {{
         background: var(--te-alert-norm-bg);
         border-color: var(--te-alert-norm-border);
+        border-left-color: var(--te-lime);
       }}
 
       .te-alert-header {{
         display: flex;
         align-items: center;
         gap: 0.65rem;
-        cursor: pointer;
-        list-style: none;
-        flex-wrap: wrap;
-      }}
-
-      .te-alert-header::-webkit-details-marker {{ display: none; }}
-
-      .te-alert-chevron {{
-        margin-left: auto;
-        font-size: 1.1rem;
-        color: var(--te-text-muted);
-        transition: transform 180ms var(--ease-out);
-      }}
-
-      details.te-alert-card[open] .te-alert-chevron {{
-        transform: rotate(90deg);
-      }}
-
-      details.te-alert-card .te-alert-body {{
-        margin-top: 0.5rem;
+        margin-bottom: 0.35rem;
       }}
 
       .te-xai-note {{
@@ -864,33 +874,32 @@ def inject_brand_css(dark_mode: bool = True) -> str:
       }}
 
       .te-alert-badge {{
-        font-family: var(--te-font-sans);
-        font-size: 0.7rem;
-        font-weight: 700;
+        font-family: 'Fira Sans Extra Condensed', sans-serif;
+        font-size: 0.78rem;
+        font-weight: 800;
         text-transform: uppercase;
-        letter-spacing: 0.055em;
-        padding: 0.2rem 0.65rem;
-        border-radius: 99px;
+        letter-spacing: 0.05em;
+        padding: 0.2rem 0.62rem;
+        border-radius: 4px;
         color: #FFFFFF !important;
       }}
 
       .badge-HIGH {{ background: var(--te-berry); }}
       .badge-LOW_SPIKE {{ background: var(--te-plum); }}
       .badge-REVISION {{ background: var(--te-orange); color: #FFFFFF !important; }}
-      .badge-NORMAL {{ background: var(--te-lime); color: #090C12 !important; }}
+      .badge-NORMAL {{ background: var(--te-navy); border: 1px solid var(--te-turquoise); color: #FFFFFF !important; }}
 
       .te-alert-title {{
-        font-family: var(--te-font-sans);
-        font-size: 1.05rem;
-        font-weight: 700;
-        letter-spacing: -0.018em;
+        font-family: 'Fira Sans Extra Condensed', sans-serif !important;
+        font-size: 1.15rem !important;
+        font-weight: 700 !important;
         color: var(--te-heading-color) !important;
-        margin: 0;
+        margin: 0 !important;
       }}
 
       .te-alert-body {{
-        font-size: 0.88rem;
-        line-height: 1.5;
+        font-size: 0.9rem;
+        line-height: 1.52;
         color: var(--te-text) !important;
         margin: 0;
       }}
@@ -1031,7 +1040,93 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         letter-spacing: 0.06em !important;
       }}
 
+      /* Rounded Box Border for AI Assistant Outer Box & Inner Chat Box (Dark Mode & Light Mode) */
+      div.st-key-te_ai_outer_box,
+      div[data-testid="stVerticalBlock"].st-key-te_ai_outer_box,
+      div[data-testid="stVerticalBlock"]:has(> div #te-ai-window-marker) {{
+        background-color: {"#0D1E2E" if dark_mode else "#FFFFFF"} !important;
+        border: 1.5px solid {"#1E3F5E" if dark_mode else "#94C6D8"} !important;
+        border-radius: 14px !important;
+        box-shadow: {"0 8px 24px rgba(0, 0, 0, 0.38)" if dark_mode else "0 6px 20px rgba(15, 75, 115, 0.09), 0 1px 3px rgba(15, 75, 115, 0.06)"} !important;
+        padding: 1rem 1.1rem !important;
+      }}
+
+      div.st-key-te_ai_chat_box,
+      div[data-testid="stVerticalBlock"].st-key-te_ai_chat_box,
+      div[data-testid="stVerticalBlock"]:has(> div #te-chat-bottom-anchor) {{
+        background-color: {"#091622" if dark_mode else "#F4FAFC"} !important;
+        border: 1px solid {"#1E3F5E" if dark_mode else "#B4DCE6"} !important;
+        border-radius: 12px !important;
+        box-shadow: {"inset 0 2px 6px rgba(0, 0, 0, 0.35)" if dark_mode else "inset 0 1px 4px rgba(15, 75, 115, 0.05)"} !important;
+      }}
+
+      /* Discreet Top-Right Gear Settings Popover Button in AI Header */
+      div.st-key-te_ai_outer_box [data-testid="stPopover"] button,
+      div[data-testid="stVerticalBlock"]:has(#te-ai-window-marker) [data-testid="stPopover"] button {{
+        height: 34px !important;
+        min-height: 34px !important;
+        width: 38px !important;
+        min-width: 38px !important;
+        padding: 0 !important;
+        border-radius: 10px !important;
+        background: {"rgba(38, 47, 64, 0.75)" if dark_mode else "#EAF7FB"} !important;
+        border: 1px solid {"#1E3F5E" if dark_mode else "#94C6D8"} !important;
+        color: var(--te-heading-color) !important;
+        box-shadow: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        float: right !important;
+      }}
+
+      div.st-key-te_ai_outer_box [data-testid="stPopover"] button svg,
+      div[data-testid="stVerticalBlock"]:has(#te-ai-window-marker) [data-testid="stPopover"] button svg {{
+        display: none !important;
+      }}
+
+      div.st-key-te_ai_outer_box [data-testid="stPopover"] button:hover,
+      div[data-testid="stVerticalBlock"]:has(#te-ai-window-marker) [data-testid="stPopover"] button:hover {{
+        border-color: var(--te-orange) !important;
+        background: var(--te-orange-light) !important;
+        transform: rotate(20deg) scale(1.04) !important;
+      }}
+
+      /* Model Reasoning (Chain-of-Thought) Collapsible Card inside Chat */
+      .te-reasoning-box {{
+        background: {"rgba(28, 37, 54, 0.72)" if dark_mode else "#F1F5F9"};
+        border: 1px solid {"rgba(90, 200, 250, 0.25)" if dark_mode else "#CBD5E1"};
+        border-left: 3px solid var(--te-orange);
+        border-radius: 8px;
+        padding: 0.55rem 0.78rem;
+        margin: 0.25rem 0 0.55rem 0;
+        font-size: 0.77rem;
+        line-height: 1.46;
+        color: var(--te-text-muted);
+      }}
+
+      .te-reasoning-summary {{
+        font-family: var(--te-font-sans);
+        font-size: 0.71rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--te-orange);
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }}
+
+      .te-reasoning-body {{
+        margin-top: 0.42rem;
+        padding-top: 0.38rem;
+        border-top: 1px dashed {"rgba(255, 255, 255, 0.10)" if dark_mode else "#CBD5E1"};
+        color: var(--te-text);
+      }}
+
       /* Compact Markdown Tables inside Chat (No Horizontal Scroll!) */
+      .st-key-te_ai_chat_box .stMarkdown table,
       [data-testid="stVerticalBlockBorderWrapper"] .stMarkdown table {{
         width: 100% !important;
         table-layout: auto !important;
@@ -1040,6 +1135,8 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         margin: 0.35rem 0 !important;
       }}
 
+      .st-key-te_ai_chat_box .stMarkdown th,
+      .st-key-te_ai_chat_box .stMarkdown td,
       [data-testid="stVerticalBlockBorderWrapper"] .stMarkdown th,
       [data-testid="stVerticalBlockBorderWrapper"] .stMarkdown td {{
         padding: 0.28rem 0.42rem !important;
@@ -1048,6 +1145,7 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         word-break: break-word !important;
       }}
 
+      .st-key-te_ai_chat_box .stMarkdown th,
       [data-testid="stVerticalBlockBorderWrapper"] .stMarkdown th {{
         background: var(--te-bg-elevated) !important;
         color: var(--te-turquoise) !important;
@@ -1204,16 +1302,19 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         }}
       }}
 
-      /* Apple iOS / macOS Sonoma Segmented Pill Tab Bar (§12 Translucent Material + §4 Spring Pill) */
+      /* Apple macOS / iPadOS Segmented Tab Navigation Bar — Clean Lines, Padding & Unmistakable Active Tab */
       div[data-baseweb="tab-list"] {{
-        background: {"rgba(118, 118, 128, 0.22)" if dark_mode else "rgba(118, 118, 128, 0.12)"} !important;
+        background: {"rgba(18, 24, 36, 0.90)" if dark_mode else "#E2E8F0"} !important;
         backdrop-filter: var(--te-glass-blur) !important;
         -webkit-backdrop-filter: var(--te-glass-blur) !important;
-        padding: 4px !important;
+        padding: 6px !important;
         border-radius: 14px !important;
-        border: 1px solid var(--te-border) !important;
-        gap: 4px !important;
-        margin-bottom: 1rem !important;
+        border: 1.5px solid {"rgba(255, 255, 255, 0.12)" if dark_mode else "#CBD5E1"} !important;
+        gap: 6px !important;
+        margin-bottom: 1.15rem !important;
+        display: flex !important;
+        align-items: stretch !important;
+        box-shadow: {"inset 0 1px 3px rgba(0, 0, 0, 0.4)" if dark_mode else "inset 0 1px 2px rgba(15, 23, 42, 0.06)"} !important;
       }}
 
       div[data-baseweb="tab-highlight"] {{
@@ -1221,21 +1322,34 @@ def inject_brand_css(dark_mode: bool = True) -> str:
       }}
 
       button[data-baseweb="tab"] {{
+        flex: 1 1 auto !important;
+        justify-content: center !important;
         font-family: var(--te-font-sans) !important;
         font-size: 0.88rem !important;
         font-weight: 600 !important;
         letter-spacing: -0.012em !important;
-        color: var(--te-text-muted) !important;
+        color: {"#94A3B8" if dark_mode else "#475569"} !important;
         border-radius: 10px !important;
-        padding: 0.48rem 1.05rem !important;
-        border: none !important;
-        transition: background-color 180ms var(--ease-out), color 180ms var(--ease-out), box-shadow 180ms var(--ease-out), transform 120ms var(--ease-out) !important;
+        padding: 0.62rem 1.2rem !important;
+        min-height: 44px !important;
+        border: 1px solid transparent !important;
+        background: transparent !important;
+        transition: background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out), box-shadow 180ms var(--ease-out), transform 120ms var(--ease-out) !important;
+      }}
+
+      @media (hover: hover) and (pointer: fine) {{
+        button[data-baseweb="tab"]:not([aria-selected="true"]):hover {{
+          color: var(--te-heading-color) !important;
+          background: {"rgba(255, 255, 255, 0.05)" if dark_mode else "rgba(255, 255, 255, 0.55)"} !important;
+        }}
       }}
 
       button[data-baseweb="tab"][aria-selected="true"] {{
-        background: {"rgba(44, 52, 68, 0.92)" if dark_mode else "#FFFFFF"} !important;
+        background: {"linear-gradient(180deg, rgba(45, 56, 76, 0.98) 0%, rgba(32, 41, 58, 0.98) 100%)" if dark_mode else "#FFFFFF"} !important;
         color: var(--te-heading-color) !important;
-        box-shadow: var(--te-specular-top), 0 3px 10px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+        font-weight: 700 !important;
+        border: 1px solid {"rgba(255, 159, 10, 0.55)" if dark_mode else "#CBD5E1"} !important;
+        box-shadow: inset 0 -3px 0 0 var(--te-orange), {"0 4px 14px rgba(0, 0, 0, 0.35)" if dark_mode else "0 4px 12px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.05)"} !important;
       }}
 
       /* Apple §14: Reduced Motion, Reduced Transparency & High Contrast Media Queries */
@@ -1433,9 +1547,9 @@ def inject_brand_css(dark_mode: bool = True) -> str:
 
 
 def render_hero_header(origin_str: str, period_label: str) -> str:
-    """Render the Turku Energia brand header with official 8:5 logo and slogan in Apple Bento style."""
-    logo_svg = get_turku_energia_logo_svg(width=114)
-    return _compact_html(f"""
+    """Render the Turku Energia brand header with official 8:5 logo and slogan."""
+    logo_svg = get_turku_energia_logo_svg(width=120)
+    return f"""
     <div class="te-hero-banner">
       <div class="te-hero-left">
         {logo_svg}
@@ -1452,7 +1566,7 @@ def render_hero_header(origin_str: str, period_label: str) -> str:
         <span class="te-slogan-sub">Close to you, seeing far ahead.</span>
       </div>
     </div>
-    """)
+    """
 
 
 def render_kpi_strip(
@@ -1514,7 +1628,7 @@ def render_kpi_strip(
 
 
 def render_alert_cards(alerts: list[dict[str, str]]) -> str:
-    """Render structured situational awareness alerts in Apple Notification style."""
+    """Render structured situational awareness alerts following Tone of Voice rules."""
     badge_labels = {
         "HIGH": "High-Price Spike Alert (>Spot+50€)",
         "LOW_SPIKE": "Low / Negative Price Alert (<Spot−50€)",
@@ -1527,19 +1641,16 @@ def render_alert_cards(alerts: list[dict[str, str]]) -> str:
         badge_txt = badge_labels.get(lvl, lvl)
         title = html.escape(alert.get("title", ""))
         body = html.escape(alert.get("body", ""))
-        # Declutter: spike alerts open by default, revision / normal collapsed to a single line
-        open_attr = " open" if lvl in ("HIGH", "LOW_SPIKE") else ""
         cards_html.append(
-            _compact_html(f"""
-            <details class="te-alert-card level-{lvl}"{open_attr}>
-              <summary class="te-alert-header">
+            f"""
+            <div class="te-alert-card level-{lvl}">
+              <div class="te-alert-header">
                 <span class="te-alert-badge badge-{lvl}">{badge_txt}</span>
-                <span class="te-alert-title">{title}</span>
-                <span class="te-alert-chevron">›</span>
-              </summary>
+                <h4 class="te-alert-title">{title}.</h4>
+              </div>
               <p class="te-alert-body">{body}</p>
-            </details>
-            """)
+            </div>
+            """
         )
     return "\n".join(cards_html)
 

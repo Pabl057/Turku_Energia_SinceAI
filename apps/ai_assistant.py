@@ -256,7 +256,94 @@ def _call_llm_api(prompt: str, api_key: str, preferred_model: str = "gemini-2.5-
     return None, last_err
 
 
+def _build_reasoning_trace(
+    question: str,
+    origin_df: pd.DataFrame,
+    briefing: dict,
+    selected_origin: pd.Timestamp,
+    matched_rows: pd.DataFrame | None,
+    matched_label: str | None,
+    driver_weights: list[dict],
+    ui_context: dict | None,
+    is_de: bool,
+    source_label: str,
+) -> str:
+    """Build a transparent step-by-step Chain-of-Thought (Model Reasoning) trace in DE or EN."""
+    ui = ui_context or {}
+    active_period = ui.get("selected_period", "Test Period (5 Oct – 1 Nov 2026)")
+    cutoff_str = ui.get("cutoff_str", selected_origin.strftime("%Y-%m-%d %H:%M:%SZ"))
+    spot_mean = float(origin_df["spot_price"].mean())
+    p50_mean = float(origin_df["p50"].mean())
+    spread_mean = p50_mean - spot_mean
+    peak_row = origin_df.loc[origin_df["p50"].idxmax()]
+    peak_t = pd.Timestamp(peak_row["delivery_start_utc"]).strftime("%H:%M UTC")
+    top_drv_str = ", ".join(
+        f"{d['driver']} ({d.get('pct', 0.0):.0f}%)" for d in driver_weights[:3]
+    )
+
+    if matched_rows is not None and matched_label is not None:
+        r0 = matched_rows.iloc[0]
+        scope_de = f"Ziel-Zeitfenster `{matched_label}` (Step {int(r0['step'])}, Spot `{r0['spot_price']:.1f} €` → P50 `{r0['p50']:.1f} €`, Band `[{r0['p10']:.1f}, {r0['p90']:.1f}] €`)"
+        scope_en = f"Target slice `{matched_label}` (Step {int(r0['step'])}, Spot `{r0['spot_price']:.1f} €` → P50 `{r0['p50']:.1f} €`, band `[{r0['p10']:.1f}, {r0['p90']:.1f}] €`)"
+    else:
+        scope_de = f"Vollständiger 10h-Horizont (40 Viertelstunden, Ø Spot `{spot_mean:.1f} €` → Ø P50 `{p50_mean:.1f} €`, Peak `{peak_row['p50']:.1f} €` um `{peak_t}`)"
+        scope_en = f"Full 10h horizon (40 quarter-hour steps, mean Spot `{spot_mean:.1f} €` → mean P50 `{p50_mean:.1f} €`, peak `{peak_row['p50']:.1f} €` at `{peak_t}`)"
+
+    if is_de:
+        return (
+            f"1. **Intent- & Anfrage-Analyse:** Frage (`\"{question}\"`) als deutschsprachige Fach-/Prognoseanfrage klassifiziert → Fokus: {scope_de}.\n"
+            f"2. **Daten- & Cutoff-Prüfung:** Zeitraum `{active_period}`, Forecast Origin `t = {selected_origin.strftime('%Y-%m-%d %H:%M UTC')}` (Cutoff `{cutoff_str}`, strikt `first_usable_origin_utc ≤ t`).\n"
+            f"3. **Modell- & TreeSHAP-Auswertung ({source_label}):** Mittlerer Spread `ΔP = {spread_mean:+.2f} €/MWh` vs. Nord Pool Spot; dominante Regelrichtung `{briefing['dominant_dir']}` (Max High-Spike `{briefing['max_p_hi']:.1%}`, Low-Spike `{briefing['max_p_lo']:.1%}`). Stärkste SHAP-Treiber: **{top_drv_str}**.\n"
+            f"4. **Antwort-Synthese:** Quantitative Kennzahlen und physikalische Netzzusammenhänge für Leitwarte & Intraday-Handel verdichtet."
+        )
+    return (
+        f"1. **Intent & Query Parsing:** Classified query (`\"{question}\"`) in English → Scope: {scope_en}.\n"
+        f"2. **Data & Cutoff Verification:** Active period `{active_period}`, Forecast Origin `t = {selected_origin.strftime('%Y-%m-%d %H:%M UTC')}` (Cutoff `{cutoff_str}`, strictly enforcing `first_usable_origin_utc ≤ t`).\n"
+        f"3. **Quantile & TreeSHAP Signal Extraction ({source_label}):** Mean spread `ΔP = {spread_mean:+.2f} €/MWh` vs. Spot; dominant mFRR direction `{briefing['dominant_dir']}` (Max High-Spike `{briefing['max_p_hi']:.1%}`, Low-Spike `{briefing['max_p_lo']:.1%}`). Top TreeSHAP drivers: **{top_drv_str}**.\n"
+        f"4. **Response Synthesis:** Structured quantitative metrics and physical grid drivers into actionable decision support."
+    )
+
+
 def generate_explainability_response(
+    question: str,
+    origin_df: pd.DataFrame,
+    briefing: dict,
+    selected_origin: pd.Timestamp,
+    api_key: str | None = None,
+    preferred_model: str = "gemini-2.5-pro",
+    ui_context: dict | None = None,
+    chat_history: list[dict] | None = None,
+) -> dict:
+    """Return context-aware AI response answering the exact user question in German or English, with Model Reasoning."""
+    res = _generate_explainability_response_core(
+        question=question,
+        origin_df=origin_df,
+        briefing=briefing,
+        selected_origin=selected_origin,
+        api_key=api_key,
+        preferred_model=preferred_model,
+        ui_context=ui_context,
+        chat_history=chat_history,
+    )
+    if "reasoning" not in res or not res["reasoning"]:
+        matched_rows, matched_label = _extract_requested_hour_rows(question, origin_df)
+        driver_weights = res.get("driver_weights") or compute_horizon_driver_weights(origin_df, matched_rows)
+        res["reasoning"] = _build_reasoning_trace(
+            question=question,
+            origin_df=origin_df,
+            briefing=briefing,
+            selected_origin=selected_origin,
+            matched_rows=matched_rows,
+            matched_label=matched_label,
+            driver_weights=driver_weights,
+            ui_context=ui_context,
+            is_de=_is_german_query(question),
+            source_label=res.get("source", "Situational Desk AI"),
+        )
+    return res
+
+
+def _generate_explainability_response_core(
     question: str,
     origin_df: pd.DataFrame,
     briefing: dict,

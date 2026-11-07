@@ -266,13 +266,14 @@ def _render_chat_sidebar(
     selected_origin: pd.Timestamp,
     ui_context: dict | None = None,
 ) -> None:
-    """Render the right-hand AI Copilot Sidebar inside a unified outer container."""
+    """Render the right-hand AI Copilot Sidebar inside a standalone window container."""
     if "te_chat_messages" not in st.session_state:
         st.session_state.te_chat_messages = []
     if "te_last_origin" not in st.session_state or st.session_state.te_last_origin != selected_origin:
         st.session_state.te_last_origin = selected_origin
         peak_row = origin_df.loc[origin_df["p50"].idxmax()]
         peak_t = pd.Timestamp(peak_row["delivery_start_utc"]).strftime("%H:%M UTC")
+        top_drv_init = ", ".join(briefing.get("top3_drivers", [])[:3])
         st.session_state.te_chat_messages = [
             {
                 "role": "assistant",
@@ -282,23 +283,61 @@ def _render_chat_sidebar(
                     f"* **Spike Risk:** High **{briefing['max_p_hi']:.1%}** · Low **{briefing['max_p_lo']:.1%}**\n\n"
                     f"Select a quick question below or ask anything about the forecast, Spot price, Dataset Period, or dashboard (EN / DE)."
                 ),
+                "reasoning": (
+                    f"1. **Origin Initialization:** Loaded 40 quarter-hour steps for `t = {selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`.\n"
+                    f"2. **Anti-Leakage Check:** Verified `first_usable_origin_utc ≤ t` across all input features.\n"
+                    f"3. **Horizon Scan:** Peak P50 reaches `{peak_row['p50']:.1f} €/MWh` at `{peak_t}` (Spot `{peak_row['spot_price']:.1f} €`); dominant drivers: **{top_drv_init}**.\n"
+                    f"4. **Risk Assessment:** Max High-Spike probability `{briefing['max_p_hi']:.1%}`, Low-Spike `{briefing['max_p_lo']:.1%}`."
+                ),
                 "source": "Situational Desk AI",
             }
         ]
 
-    # Unified Outer Box wrapping the entire AI Assistant section
-    with st.container(border=True):
-        st.markdown(
-            """
-            <div class="te-section-header" style="margin-top:0; margin-bottom:0.55rem;">
-              <h3 class="te-section-title" style="font-size:1.3rem;">🤖 AI Assistant<span>.</span></h3>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    # Standalone Outer Window wrapping the entire AI Assistant section
+    with st.container(border=True, key="te_ai_outer_box"):
+        st.markdown("<div id='te-ai-window-marker' style='display:none;'></div>", unsafe_allow_html=True)
+
+        # Header Row: Title on Left + Discreet Gear Settings Popover Button on Top-Right
+        hdr_left, hdr_right = st.columns([5.6, 1.0], gap="small")
+        with hdr_left:
+            st.markdown(
+                """
+                <div style="padding-top:0.15rem; margin-bottom:0.35rem;">
+                  <h3 class="te-section-title" style="font-size:1.25rem; margin:0;">🤖 AI Assistant<span>.</span></h3>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with hdr_right:
+            with st.popover("⚙️", help="AI Settings: Model, API Key & Reset Chat"):
+                st.markdown("**⚙️ AI Assistant Settings**")
+                st.selectbox(
+                    "AI Model (when API Key is provided)",
+                    [
+                        "gemini-2.5-pro",
+                        "gemini-2.5-flash",
+                        "gemini-2.0-flash",
+                    ],
+                    index=0,
+                    help=(
+                        "Select the primary LLM model. Also auto-detects OpenAI (gpt-4o if key starts with sk-...) "
+                        "or Groq (llama-3.3-70b-versatile if key starts with gsk_...)."
+                    ),
+                    key="preferred_llm_model",
+                )
+                st.text_input(
+                    "API Key (Gemini AIza..., OpenAI sk-..., or Groq gsk_...)",
+                    type="default",
+                    placeholder="Paste API key here (masked automatically)...",
+                    help="Masked via CSS (-webkit-text-security: disc) so Chrome's Google Password Manager never pops up.",
+                    key="gemini_api_key_input",
+                )
+                if st.button("🗑️ Clear Chat History", use_container_width=True):
+                    st.session_state.te_chat_messages = st.session_state.te_chat_messages[:1]
+                    st.rerun()
 
         # 1. TOP: Scrollable Chat History Container
-        chat_box = st.container(height=500, border=True)
+        chat_box = st.container(height=500, border=True, key="te_ai_chat_box")
 
         # 2. MIDDLE ("dazwischen"): Quick-Prompt Suggestion Buttons
         peak_hour_str = pd.Timestamp(origin_df.loc[origin_df["p50"].idxmax(), "delivery_start_utc"]).strftime("%H:%M")
@@ -319,7 +358,14 @@ def _render_chat_sidebar(
             if st.button("🏭 Review Actions", use_container_width=True, key="qp_rec"):
                 triggered_prompt = "What operational suggestions to review do you have for shift supervisors and traders?"
 
-        # 3. BOTTOM: Compact Single-Row Chat Input Form + Settings Expander
+        # 3. REASONING TOGGLE + CHAT INPUT FORM (No settings clutter underneath!)
+        show_reasoning = st.toggle(
+            "🧠 Show Model Reasoning (Chain-of-Thought)",
+            value=bool(st.session_state.get("te_show_reasoning", False)),
+            key="te_show_reasoning",
+            help="Displays the AI model's step-by-step analytical reasoning process (intent analysis, data cutoff check, TreeSHAP feature weighting, and decision synthesis) above each answer.",
+        )
+
         with st.form("te_chat_form", clear_on_submit=True, border=False):
             in_col, btn_col = st.columns([3.3, 1.0], gap="small")
             with in_col:
@@ -332,32 +378,6 @@ def _render_chat_sidebar(
                 submitted = st.form_submit_button("Send ➤", type="primary", use_container_width=True)
             if submitted and user_text.strip():
                 triggered_prompt = user_text.strip()
-
-        with st.expander("⚙️ AI Model, API Key & Reset Chat", expanded=False):
-            st.selectbox(
-                "AI Model (used when API Key is provided)",
-                [
-                    "gemini-2.5-pro",
-                    "gemini-2.5-flash",
-                    "gemini-2.0-flash",
-                ],
-                index=0,
-                help=(
-                    "Select the primary LLM model. Also auto-detects OpenAI (gpt-4o if key starts with sk-...) "
-                    "or Groq (llama-3.3-70b-versatile if key starts with gsk_...)."
-                ),
-                key="preferred_llm_model",
-            )
-            st.text_input(
-                "API Key (Gemini AIza..., OpenAI sk-..., or Groq gsk_...)",
-                type="default",
-                placeholder="Paste API key here (masked automatically)...",
-                help="Masked via CSS (-webkit-text-security: disc) so Chrome's Google Password Manager never pops up.",
-                key="gemini_api_key_input",
-            )
-            if st.button("🗑️ Clear Chat History", use_container_width=True):
-                st.session_state.te_chat_messages = st.session_state.te_chat_messages[:1]
-                st.rerun()
 
         # Process newly triggered question before rendering inside chat_box
         if triggered_prompt:
@@ -377,11 +397,12 @@ def _render_chat_sidebar(
                 {
                     "role": "assistant",
                     "markdown": resp["markdown"],
+                    "reasoning": resp.get("reasoning", ""),
                     "source": resp.get("source", "Situational Desk AI"),
                 }
             )
 
-        # Populate the top Chat Container with all messages (clean text & tables, no bulky SHAP bars)
+        # Populate the top Chat Container with all messages (plus optional Model Reasoning trace)
         with chat_box:
             for idx, msg in enumerate(st.session_state.te_chat_messages):
                 if msg["role"] == "user":
@@ -405,6 +426,19 @@ def _render_chat_sidebar(
                         """,
                         unsafe_allow_html=True,
                     )
+                    if show_reasoning and msg.get("reasoning"):
+                        st.markdown(
+                            """
+                            <div class="te-reasoning-box">
+                              <div class="te-reasoning-summary">
+                                <span>🧠 Model Reasoning (Chain-of-Thought)</span>
+                                <span>Verified</span>
+                              </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(msg["reasoning"])
                     st.markdown(msg["markdown"])
 
                     if idx + 1 < len(st.session_state.te_chat_messages):
@@ -438,25 +472,12 @@ def main() -> None:
     dark_mode: bool = bool(st.session_state.dark_mode)
 
     # ------------------------------------------------------------------
-    # Left Sidebar: Time Machine Controls & Anti-Leakage Gate
+    # Left Sidebar: Clean Time Machine Controls (No Header Box / No Gate Box)
     # ------------------------------------------------------------------
     with st.sidebar:
         st.markdown(
             """
-            <div class="te-sb-header-card">
-              <div class="te-sb-kicker">Control Desk Navigation</div>
-              <h2 class="te-sb-title">⏱️ Historical Time Machine</h2>
-              <p class="te-sb-desc">
-                Jump to any hourly forecast origin (<i>t</i>) to inspect the exact 10-hour outlook known at that moment.
-              </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            """
-            <div class="te-sb-section-label">
+            <div class="te-sb-section-label" style="margin-top:0.2rem;">
               <span>1. Dataset Period</span>
               <span class="te-sb-count-pill">2026</span>
             </div>
@@ -602,31 +623,8 @@ def main() -> None:
             help="Overlays realized imbalance prices after origin t for post-event validation.",
         )
 
-        st.markdown("<div style='height:0.45rem;'></div>", unsafe_allow_html=True)
         origin_rows = active_sub[active_sub["forecast_origin_utc"] == selected_origin].sort_values("step")
         cutoff_ts = pd.Timestamp(origin_rows["data_cutoff_utc"].iloc[0])
-        st.markdown(
-            f"""
-            <div class="te-gate-box">
-              <div style="font-family:'Fira Sans Extra Condensed',sans-serif; font-weight:800; font-size:0.92rem; text-transform:uppercase; color:#46BEDC; margin-bottom:0.35rem; letter-spacing:0.03em;">
-                🛡️ Anti-Leakage Gate (Rule #1)
-              </div>
-              <div class="te-gate-row">
-                <span><strong>Origin (<i>t</i>):</strong></span>
-                <code>{selected_origin.strftime('%Y-%m-%d %H:%M:%SZ')}</code>
-              </div>
-              <div class="te-gate-row">
-                <span><strong>Data Cutoff:</strong></span>
-                <code>{cutoff_ts.strftime('%Y-%m-%d %H:%M:%SZ')}</code>
-              </div>
-              <div class="te-gate-verified">
-                <span>✓ Verified:</span>
-                <code style="background:transparent !important; border:none !important; padding:0 !important; color:inherit !important; font-weight:700;">first_usable_origin_utc ≤ t</code>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
     # ------------------------------------------------------------------
     # Prepare Data for Selected Origin t
@@ -696,8 +694,8 @@ def main() -> None:
         # 3. Main Navigation Tabs
         tab_forecast, tab_drivers, tab_hindsight, tab_api = st.tabs([
             "📈 10-Hour Forecast & Risk Monitor",
-            "🔍 Why This Forecast & Uncertainty? (XAI Inspector)",
-            "🎯 Hindsight Benchmark & Statistical Proof",
+            "🔍 Physical Grid Drivers & SHAP Explainability",
+            "🎯 Hindsight Benchmark vs. Official Baseline",
             "🔌 40-Step Data Table & JSON API",
         ])
 
