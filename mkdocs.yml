@@ -32,11 +32,13 @@ theme:
 
 nav:
   - Home: index.md
+  - High-Level Overview: OVERVIEW.md
   - System Architecture: ARCHITECTURE.md
   - Evaluation Report: EVALUATION_REPORT.md
   - Architecture & Timeline Guide: PROJECT_GUIDE.md
   - Data Sources, Models & Licenses: DATA_MODELS_LICENSES.md
   - Challenge Brief: CHALLENGE_BRIEF.md
+
 markdown_extensions:
   - admonition
   - attr_list
