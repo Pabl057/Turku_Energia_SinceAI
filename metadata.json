@@ -3,7 +3,7 @@
   "checkpoint_id": "01M6VCAM9C2N7C6G16ZE00FC40",
   "strategy": "manual-commit",
   "branch": "feat/more-data",
-  "checkpoints_count": 19,
+  "checkpoints_count": 20,
   "files_touched": [
     "forecast_backtest.csv",
     "src/data/extra_data.py",
@@ -31,6 +31,12 @@
       "transcript": "/2/full.jsonl",
       "content_hash": "/2/content_hash.txt",
       "prompt": ""
+    },
+    {
+      "metadata": "/3/metadata.json",
+      "transcript": "/3/full.jsonl",
+      "content_hash": "/3/content_hash.txt",
+      "prompt": "/3/prompt.txt"
     }
   ],
   "token_usage": {
