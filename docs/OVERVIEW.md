@@ -10,17 +10,17 @@ At any hourly forecast origin $t$, our system transforms raw grid and market dat
 
 ```mermaid
 flowchart LR
-    A["1. Market & Grid Data<br/>Fingrid · ENTSO-E · Nord Pool<br/>(Strict Anti-Leakage Filter)"] --> B["2. Physical Feature Engine<br/>181 Features Combining<br/>Real-Time Stress + D-1 Plans"]
-    B --> C["3. Calibrated AI Suite<br/>LightGBM Spread Models +<br/>Conformal 80% Uncertainty"]
-    C --> D["4. Decision Support<br/>forecast_backtest.csv +<br/>Situational Desk & Time Machine"]
+    A["1. Market & Grid Data<br/>Fingrid (incl. RT 181/188) · ENTSO-E · Nord Pool<br/>(Strict Anti-Leakage Filter)"] --> B["2. Physical Feature Engine<br/>197 Features Combining<br/>Real-Time Stress + D-1 Plans"]
+    B --> C["3. Calibrated AI Suite<br/>Dual-Depth Adaptive Stacking +<br/>Conformal 80% Uncertainty + Birnbaum XAI"]
+    C --> D["4. Decision Support<br/>forecast_backtest.csv +<br/>Situational Desk & AI Copilot"]
 ```
 
 | Stage | What It Does | Why It Matters |
 | :--- | :--- | :--- |
-| **1. Market & Grid Data** | Loads Fingrid, ENTSO-E, and Nord Pool time series and filters out anything published after origin $t$ (`first_usable_origin_utc <= t`). | Guarantees **100% zero future data leakage** (`Rule #1`). |
-| **2. Physical Feature Engine** | Combines **what just happened on the grid** (last 30–120 min) with **what is scheduled for tomorrow** (known Day-Ahead spot price, wind, solar, and load). | Captures both short-term grid inertia and long-term supply/demand ramps. |
-| **3. Calibrated AI Suite** | Predicts the price deviation ($\Delta P$) from the known spot price, calibrates the 80% uncertainty band (`P10–P90`), and explains the top 3 physical drivers via **TreeSHAP**. | Reduces error by **34.5% (MAE)** and **48.6% (Pinball)** while hitting **exact 80.0% coverage**. |
-| **4. Decision Support** | Outputs the validated submission (`forecast_backtest.csv`) and powers the interactive **Level 2 Situational Desk & Historical Time Machine**. | Gives shift supervisors and traders early spike warnings and concrete review suggestions. |
+| **1. Market & Grid Data** | Loads Fingrid (including 3-min RT Wind `181`, Nuclear `188`, Production `191`, Grid State `177`, and pre-June `aFRR/mFRR` lag buffer), ENTSO-E, and Nord Pool series filtered by `first_usable_origin_utc <= t`. | Guarantees **100% zero future data leakage** (`Rule #1`). |
+| **2. Physical Feature Engine** | Combines **what just happened on the grid** (last 30–120 min, including real-time wind forecast error & implied aFRR volume) with **what is scheduled for tomorrow** (known Day-Ahead spot price, wind, solar, and load). | Captures both short-term grid inertia and long-term supply/demand ramps. |
+| **3. Calibrated AI Suite** | Predicts the price deviation ($\Delta P$) via a dual-depth adaptive stacking + short-horizon ensemble, calibrates the 80% uncertainty band (`P10–P90`), couples spike risk to regulation direction, and explains drivers via **TreeSHAP** & **Birnbaum Reliability ($I_B, I_{CR}, I_{FV}$)**. | Reduces error by **34.8% (MAE)** and **48.6% (Pinball)** while hitting **exact 80.0% coverage** ($p < 10^{-100}$). |
+| **4. Decision Support** | Outputs the validated submission (`forecast_backtest.csv`) and powers the interactive **Level 2 Situational Desk, Time Machine, Birnbaum XAI & AI Copilot**. | Gives shift supervisors and traders early spike warnings and concrete review suggestions. |
 
 ---
 
@@ -68,21 +68,21 @@ Instead of a single black-box model, five specialized modules produce a mathemat
 
 ```mermaid
 flowchart TD
-    FEAT["181 Leak-Free Features per Step"] --> M1 & M2 & M3 & M4
+    FEAT["197 Leak-Free Features per Step"] --> M1 & M2 & M3 & M4
 
-    M1["1. Point Forecast (p50)<br/>Full + Short-Horizon L1 Regressors<br/>→ -34.5% MAE (43.35 €/MWh)"]
+    M1["1. Point Forecast (p50)<br/>Dual-Depth Adaptive Stacking (60/40) + Short-Horizon L1<br/>→ -34.8% MAE (43.19 €/MWh)"]
     M2["2. Uncertainty Band (p10, p90)<br/>Quantile GBDT + Conformal Calibration<br/>→ -48.6% Pinball & Exact 80.0% Coverage"]
-    M3["3. Spike Detector (±50 €/MWh)<br/>Classifier + Uncertainty Tail Blend<br/>→ ~87% Accuracy / Up to 87.4% ROC-AUC"]
-    M4["4. Balancing Direction (up/down/none)<br/>3-Class GBDT + Base-Rate Shrinkage<br/>→ 72.4% Hour-1 Accuracy"]
+    M3["3. Spike Detector (±50 €/MWh)<br/>Classifier + Tail Blend + Direction Coupling<br/>→ 0.0928 Brier (-18.0% vs Baseline)"]
+    M4["4. Balancing Direction (up/down/none)<br/>3-Class GBDT + Base-Rate Shrinkage<br/>→ 0.4080 Brier (-9.5% vs Baseline)"]
 
-    M1 --> SHAP["5. Exact TreeSHAP Explainer<br/>Extracts Top 3 Physical Drivers per Step<br/>(top_drivers column)"]
+    M1 --> SHAP["5. Exact TreeSHAP & Birnbaum Reliability XAI<br/>Top 3 Drivers per Step + Subsystem Criticality (I_B / I_CR / I_FV)"]
     M1 & M2 & M3 & M4 & SHAP --> GUARD["Post-Processing Guardrails<br/>p10 ≤ p50 ≤ p90 · Probabilities Sum to 1.0"]
 ```
 
 ### Key Innovations in Plain Language
 1. **Split Conformal Calibration (`p10`, `p90`):** Standard decision trees are overconfident (capturing only ~68% of actual prices). We scale the interval width using recent out-of-sample errors so **exactly 80.0%** of actual prices fall inside `[P10, P90]`.
-2. **Uncertainty-Aware Spike Probabilities (`p_spike_high`, `p_spike_low`):** Combines a dedicated spike classifier with the width of our `P10–P90` interval—when uncertainty widens during a wind ramp, spike probability automatically rises.
-3. **TreeSHAP Transparency (`top_drivers`):** Every single forecast row names the top 3 physical factors driving that specific quarter-hour (e.g., `day_ahead_spot_price;residual_load_forecast;wind_forecast_3h_ramp`).
+2. **Uncertainty-Aware & Direction-Coupled Spike Probabilities (`p_spike_high`, `p_spike_low`):** Combines a dedicated spike classifier with the width of our `P10–P90` interval and physical mFRR regulation direction (`up` for positive spikes, `down` for negative spikes).
+3. **TreeSHAP & Birnbaum Reliability XAI (`top_drivers` + $I_B, I_{CR}, I_{FV}$):** Every forecast row names the top 3 physical factors driving that specific quarter-hour, while the dashboard decomposes grid spike risk into Reliability Engineering importance measures and a 40-step Temporal Driver Attention Heatmap.
 
 ---
 
@@ -92,25 +92,25 @@ The Level 2 Streamlit application (`apps/dashboard.py`) turns the 40-step foreca
 
 ```mermaid
 flowchart LR
-    FC["40-Step Forecast<br/>+ TreeSHAP Drivers"] --> TRIAGE["Automated Risk Triage<br/>• Spike Risk ≥ 30%<br/>• Uncertainty Band ≥ 120 €<br/>• Forecast Shift |Δp50| ≥ 25 €"]
+    FC["40-Step Forecast<br/>+ TreeSHAP & Birnbaum XAI"] --> TRIAGE["Automated Risk Triage<br/>• Spike Risk ≥ 30%<br/>• Uncertainty Band ≥ 120 €<br/>• Forecast Shift |Δp50| ≥ 15 €"]
 
-    TRIAGE --> DESK["Live Situational Desk<br/>Fan Chart + Alert Banner +<br/>Asset & Trading Review Prompts"]
-    TRIAGE --> TM["Historical Time Machine<br/>Step Through 1,345 Past Origins +<br/>Compare Hindsight & 1h Revisions"]
+    TRIAGE --> DESK["Live Situational Desk<br/>Fan Chart + Alert Banner +<br/>Birnbaum Reliability & Temporal Heatmap"]
+    TRIAGE --> TM["Historical Time Machine & AI Copilot<br/>Step Through 1,345 Past Origins +<br/>Ablation & Wilcoxon Significance Proof"]
 ```
 
 | User Persona | What They See | Example Suggested Action to Review |
 | :--- | :--- | :--- |
 | **Production Shift Supervisor** *(Power plants, electric boilers, heat pumps)* | 10-hour P10–P50–P90 price fan chart, high/low spike alert banners, and dominant mFRR direction. | **High Up-Spike Risk (`>30%`):** Consider deferring flexible electric boiler / heat pump consumption or checking fast-start reserve readiness.<br/>**Low / Negative Price Risk:** Opportunity to absorb cheap surplus electricity in district heating boilers or thermal storage. |
-| **Electricity Trading Specialist** *(Intraday & balancing markets)* | Hour-over-hour forecast revision deltas ($t - 1\text{h} \to t$), TreeSHAP drivers, and cross-border flow telemetry. | **Material Upward Revision (`Δp50 ≥ +25 €/MWh`):** Review intraday short exposure before gate closure as real-time Fingrid consumption error tightens the grid. |
+| **Electricity Trading Specialist** *(Intraday & balancing markets)* | Hour-over-hour forecast revision deltas ($t - 1\text{h} \to t$), TreeSHAP drivers, Birnbaum subsystem criticality, and cross-border flow telemetry. | **Material Upward Revision (`Δp50 ≥ +15 €/MWh`):** Review intraday short exposure before gate closure as real-time Fingrid consumption error tightens the grid. |
 
 ---
 
 ## 6. Headline Results at a Glance (Slide Scorecard)
 
-| Evaluation Criterion | Official Weight | Starter Baseline | Our Solution | Impact |
+| Evaluation Criterion | Official Weight | Starter Baseline | Our Solution | Impact & Statistical Significance |
 | :--- | :---: | ---: | ---: | :--- |
-| **Point Accuracy (`p50` MAE)** | **30%** | 66.20 €/MWh | **43.35 €/MWh** | **-34.5% error** (**-40.1%** at Hour 10) |
-| **Uncertainty (`p10`–`p90` Pinball)** | **20%** | 24.18 | **12.43** | **-48.6% pinball loss** |
+| **Point Accuracy (`p50` MAE)** | **30%** | 66.20 €/MWh | **43.19 €/MWh** | **-34.8% error** (**39.44 €/MWh** at Hour 1; $t=27.46,\ p<10^{-100}$) |
+| **Uncertainty (`p10`–`p90` Pinball)** | **20%** | 24.18 | **12.44** | **-48.6% pinball loss** ($t=29.26,\ p<10^{-100}$) |
 | **P10–P90 Interval Coverage** | *(Target 80%)* | 68.29% | **80.00%** | **Exact 80.0% calibration target** |
-| **Spike Identification (`±50 €` Brier)** | **20%** | 0.1132 | **0.0943** | **-16.6% Brier** (**~87% accuracy**) |
-| **Balancing Direction (3-Class Brier)** | **10%** | 0.4509 | **0.4132** | **-8.4% Brier** (**72.4% Hour-1 accuracy**) |
+| **Spike Identification (`±50 €` Brier)** | **20%** | 0.1132 | **0.0928** | **-18.0% Brier** (`p_spike_low: 0.0862`; $t=37.87,\ p<10^{-100}$) |
+| **Balancing Direction (3-Class Brier)** | **10%** | 0.4509 | **0.4080** | **-9.5% Brier** (**0.3608** at Hour 1; $t=32.95,\ p<10^{-100}$) |
