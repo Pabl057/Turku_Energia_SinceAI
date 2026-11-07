@@ -1040,13 +1040,6 @@ def inject_brand_css(dark_mode: bool = True) -> str:
         justify-content: space-between;
       }}
 
-      /* Mask API Key Input visually without using type="password" so Google Password Manager never triggers */
-      div.st-key-gemini_api_key_input input {{
-        -webkit-text-security: disc !important;
-        text-security: disc !important;
-        font-family: 'Fira Mono', monospace !important;
-        letter-spacing: 0.06em !important;
-      }}
 
       /* Rounded Box Border for AI Assistant Outer Box & Inner Chat Box (Dark Mode & Light Mode) */
       div.st-key-te_ai_outer_box,
@@ -1883,21 +1876,6 @@ def get_toolbar_theme_toggle_html(dark_mode: bool = True, chat_msg_count: int = 
         setTimeout(mountButton, 400);
       }}
 
-      // 2. Prevent Google Password Manager / Autofill on the API Key field
-      function hardenApiKeyInput() {{
-        const apiInput = doc.querySelector('div.st-key-gemini_api_key_input input');
-        if (apiInput) {{
-          apiInput.setAttribute('autocomplete', 'off');
-          apiInput.setAttribute('autocorrect', 'off');
-          apiInput.setAttribute('autocapitalize', 'off');
-          apiInput.setAttribute('spellcheck', 'false');
-          apiInput.setAttribute('data-lpignore', 'true');
-          apiInput.setAttribute('data-1p-ignore', 'true');
-          apiInput.setAttribute('data-form-type', 'other');
-        }}
-      }}
-      hardenApiKeyInput();
-      setTimeout(hardenApiKeyInput, 250);
 
       // 3. Auto-scroll AI Assistant Chat container to bottom when new messages arrive
       function scrollChatToBottom() {{

@@ -1,29 +1,23 @@
-"""Integrated AI Explainability & Dashboard Copilot (Multi-Model LLM + Deep Context Engine).
+"""Integrated AI Explainability & Dashboard Copilot (Local TreeSHAP + Deep Context Engine).
 
 Capabilities:
-1. Top-Tier Live AI Models:
-   - Google Gemini (`gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`)
-   - Auto-support for OpenAI (`gpt-4o` if `sk-...` key provided) & Groq (`llama-3.3-70b-versatile` if `gsk_...` key provided).
-2. Full UI & Data Context Grounding:
+1. Full UI & Data Context Grounding:
    - Active `selected_period`, `filter_mode`, `selected_origin`, `show_hindsight`, and multi-turn `chat_history`.
    - Complete 40-step quarter-hour forecast matrix (Spot, P10, P50, P90, mFRR Up/Down/None,
      High/Low Spike probabilities, Wind DA, Consumption DA, Residual Load, and TreeSHAP drivers).
    - Full knowledge of every UI element on the website (Dataset Period, Quick Filter, Forecast Origin,
      Anti-Leakage Gate Rule #1, KPI Cards, Fan Chart, Spike Monitor, mFRR Direction, and Benchmarks).
-3. Bilingual (German & English) & Zero-Horizontal-Scroll Formatting.
+2. Bilingual (German & English) & Zero-Horizontal-Scroll Formatting.
 """
 
 from __future__ import annotations
 
-import os
 import re
 import pandas as pd
-import requests
 
 from apps.theme import format_driver_name
 from apps.ai_knowledge_base import (
     is_german_query,
-    kb_digest_for_llm,
     match_kb_entry,
     render_kb_entry,
 )
@@ -94,275 +88,6 @@ def _extract_requested_hour_rows(question: str, origin_df: pd.DataFrame) -> tupl
     return None, None
 
 
-def _build_grounded_context_prompt(
-    question: str,
-    origin_df: pd.DataFrame,
-    briefing: dict,
-    selected_origin: pd.Timestamp,
-    ui_context: dict | None = None,
-    chat_history: list[dict] | None = None,
-) -> str:
-    """Create a complete, leak-free context prompt covering UI state, docs, and all 40 forecast steps."""
-    ui = ui_context or {}
-    active_period = ui.get("selected_period", "Test Period (5 Oct – 1 Nov 2026)")
-    active_filter = ui.get("filter_mode", "All 673 Origins (Chronological)")
-    origin_pos = ui.get("origin_pos_str", "1 / 673")
-    cutoff_str = ui.get("cutoff_str", selected_origin.strftime("%Y-%m-%d %H:%M:%SZ"))
-
-    peak_hi_row = origin_df.loc[origin_df["p_spike_high"].idxmax()]
-    peak_lo_row = origin_df.loc[origin_df["p_spike_low"].idxmax()]
-    peak_p50_row = origin_df.loc[origin_df["p50"].idxmax()]
-    min_p50_row = origin_df.loc[origin_df["p50"].idxmin()]
-
-    spot_mean = float(origin_df["spot_price"].mean())
-    spot_min = float(origin_df["spot_price"].min())
-    spot_max = float(origin_df["spot_price"].max())
-    p50_mean = float(origin_df["p50"].mean())
-
-    rows_txt = []
-    for _, r in origin_df.iterrows():
-        ts = pd.Timestamp(r["delivery_start_utc"]).strftime("%H:%M")
-        drvs = ", ".join(format_driver_name(d) for d in str(r["top_drivers"]).split(";")[:2] if d.strip())
-        rows_txt.append(
-            f"S{int(r['step'])}({ts}): Spot={r['spot_price']:.1f}, P50={r['p50']:.1f} [{r['p10']:.1f}..{r['p90']:.1f}], "
-            f"Up={r['p_up']:.0%}/Dn={r['p_down']:.0%}, SpkHi={r['p_spike_high']:.0%}/Lo={r['p_spike_low']:.0%}, "
-            f"Wind={r['wind_da']:.0f}MW, Load={r['cons_da']:.0f}MW, ResLoad={r['residual_load_da']:.0f}MW, Drv=[{drvs}]"
-        )
-
-    history_txt = ""
-    if chat_history and len(chat_history) > 1:
-        recent_turns = chat_history[-5:-1]
-        turn_lines = [f"{m['role'].upper()}: {m['markdown'][:280]}" for m in recent_turns]
-        history_txt = "\nRecent Conversation History:\n" + "\n".join(turn_lines) + "\n"
-
-    lang_instruction = (
-        "WICHTIG: Der Nutzer fragt auf DEUTSCH – antworte ausschließlich auf Deutsch."
-        if _is_german_query(question)
-        else "IMPORTANT: The user asks in ENGLISH – respond only in English."
-    ) + " (General rule: always reply in the same language as the user's question.)"
-
-    matched_kb = match_kb_entry(question)
-    kb_hint = ""
-    if matched_kb is not None:
-        kb_title, kb_body = matched_kb["en"]
-        kb_hint = f"\nRelevant UI Component Reference ({kb_title}):\n{kb_body}\n"
-
-    return f"""You are the intelligent AI Assistant for the Turku Energia Imbalance Price Situational Desk.
-{lang_instruction}
-
-Formatting Rules for Sidebar Display:
-- Directly answer the user's specific question first! Never ignore their question or output a generic summary.
-- Keep answers concise, well-structured, and easy to read.
-- If you include a Markdown table, use AT MOST 4 short columns (`| UTC | Spot → P50 | P10–P90 | Spike |`) so there is zero horizontal scrolling.
-- Frame operational advice as "Suggestions to Review" (Prüf-Empfehlungen), never as automated switching commands.
-
-Active Dashboard State:
-- Dataset Period: `{active_period}` | Filter: `{active_filter}` ({origin_pos})
-- Forecast Origin `t`: `{selected_origin.strftime('%Y-%m-%d %H:%M UTC')}` (Data Cutoff: `{cutoff_str}`, Rule #1 `first_usable_origin_utc <= t` verified)
-- Spot Price (Nord Pool D-1 14:00): Mean `{spot_mean:.2f} €/MWh` (Min `{spot_min:.2f} €`, Max `{spot_max:.2f} €`)
-- Imbalance Price Forecast (P50): Mean `{p50_mean:.2f} €/MWh` | 80% Confidence Band (`P10–P90`) Mean Width: `{briefing['mean_band']:.1f} €/MWh`
-- Validation Benchmark (Tab 3): Dual-depth LightGBM + Conformal Calibration + TreeSHAP cuts P50 MAE by 35% (`43.19` vs `66.20 €/MWh` baseline), halves Pinball Loss (`12.43` vs `24.18`), hits exact `80.0%` P10–P90 coverage, Spike Brier `0.0928`, Direction Brier `0.4132`.
-{kb_hint}
-Live Data Summary for Current Origin `t = {selected_origin.strftime('%Y-%m-%d %H:%M UTC')}`:
-- Dominant Balancing Direction: {briefing['dominant_dir']} (Mean P_Up={briefing['mean_p_up']:.1%}, Mean P_Down={briefing['mean_p_down']:.1%})
-- Peak High-Spike Risk: {briefing['max_p_hi']:.1%} at {pd.Timestamp(peak_hi_row['delivery_start_utc']).strftime('%H:%M UTC')} (P50={peak_hi_row['p50']:.1f} € vs Spot={peak_hi_row['spot_price']:.1f} €)
-- Peak Low-Spike Risk: {briefing['max_p_lo']:.1%} at {pd.Timestamp(peak_lo_row['delivery_start_utc']).strftime('%H:%M UTC')} (P50={peak_lo_row['p50']:.1f} €)
-- Highest P50 Price: {peak_p50_row['p50']:.1f} €/MWh at {pd.Timestamp(peak_p50_row['delivery_start_utc']).strftime('%H:%M UTC')}
-- Lowest P50 Price: {min_p50_row['p50']:.1f} €/MWh at {pd.Timestamp(min_p50_row['delivery_start_utc']).strftime('%H:%M UTC')}
-- Forecast Revision vs Previous Hour (t-1h): Max ΔP50 = {briefing['max_abs_rev']:.1f} €/MWh (Mean {briefing['mean_rev']:+.1f} €/MWh)
-{history_txt}
-All 40 Quarter-Hour Steps for Origin `{selected_origin.strftime('%H:%M UTC')}`:
-{chr(10).join(rows_txt)}
-
-User Question: {question}
-"""
-
-
-def _discover_env_api_key() -> str:
-    """Discover LLM API key from environment variables or local .env files."""
-    for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY"):
-        val = os.environ.get(var, "").strip()
-        if val:
-            return val
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for rel in (".env", "api_key.env"):
-        env_path = os.path.join(root, rel)
-        if os.path.isfile(env_path):
-            try:
-                with open(env_path, encoding="utf-8") as fh:
-                    for line in fh:
-                        m = re.match(
-                            r"^\s*(?:GEMINI_API_KEY|GOOGLE_API_KEY|OPENAI_API_KEY|GROQ_API_KEY)\s*=\s*(.+?)\s*$",
-                            line,
-                        )
-                        if m:
-                            candidate = m.group(1).strip().strip("\"'")
-                            if candidate:
-                                return candidate
-            except OSError:
-                pass
-    return ""
-
-
-def _extract_gemini_text(data: dict) -> str | None:
-    """Extract text parts from Gemini response safely (handling 2.5 thinking parts)."""
-    candidates = data.get("candidates") or []
-    if not candidates:
-        return None
-    content = candidates[0].get("content") or {}
-    parts = content.get("parts") or []
-    non_thought = [p["text"] for p in parts if isinstance(p, dict) and p.get("text") and not p.get("thought")]
-    if non_thought:
-        return "\n".join(non_thought).strip()
-    any_text = [p["text"] for p in parts if isinstance(p, dict) and p.get("text")]
-    if any_text:
-        return "\n".join(any_text).strip()
-    return None
-
-
-def _call_llm_api(prompt: str, api_key: str, preferred_model: str | None = None) -> tuple[str | None, str | None]:
-    """Automatically detect provider from API key and call the best available live model."""
-    key = api_key.strip().strip("\"'")
-    if not key:
-        return None, None
-
-    # 1. Anthropic Claude API key support (sk-ant-...)
-    if key.startswith("sk-ant-"):
-        try:
-            resp = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": key,
-                    "anthropic-version": "2023-06-01",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "claude-3-5-sonnet-latest",
-                    "max_tokens": 900,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=18,
-            )
-            if resp.status_code == 200:
-                blocks = resp.json().get("content", [])
-                txt = "\n".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
-                if txt:
-                    return txt, "Claude · Live"
-            err_json = resp.json() if resp.content else {}
-            return None, f"Anthropic API: {err_json.get('error', {}).get('message', f'HTTP {resp.status_code}')}"
-        except Exception as exc:
-            return None, f"Anthropic API: {exc}"
-
-    # 2. OpenAI API key support (sk-...)
-    if key.startswith("sk-"):
-        last_err = None
-        for oai_model in ("gpt-4o-mini", "gpt-4o"):
-            try:
-                resp = requests.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json={
-                        "model": oai_model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.25,
-                        "max_tokens": 900,
-                    },
-                    timeout=18,
-                )
-                if resp.status_code == 200:
-                    return resp.json()["choices"][0]["message"]["content"], "OpenAI · Live"
-                err_json = resp.json() if resp.content else {}
-                last_err = err_json.get("error", {}).get("message", f"HTTP {resp.status_code}")
-            except Exception as exc:
-                last_err = str(exc)
-        return None, f"OpenAI API: {last_err}"
-
-    # 3. Groq API key support (gsk_...)
-    if key.startswith("gsk_"):
-        try:
-            resp = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.25,
-                    "max_tokens": 900,
-                },
-                timeout=18,
-            )
-            if resp.status_code == 200:
-                return resp.json()["choices"][0]["message"]["content"], "Groq · Live"
-            err_json = resp.json() if resp.content else {}
-            return None, f"Groq API: {err_json.get('error', {}).get('message', f'HTTP {resp.status_code}')}"
-        except Exception as exc:
-            return None, f"Groq API: {exc}"
-
-    # 4. Google AI Studio / Vertex AI Express (Gemini) — accepts any key prefix (AIza..., AQ..., etc.)
-    gemini_models = [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-3-flash-preview",
-        "gemini-2.5-pro",
-        "gemini-2.0-flash",
-    ]
-    endpoints = (
-        [
-            "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent",
-            "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-        ]
-        if key.startswith("AQ.")
-        else [
-            "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent",
-        ]
-    )
-    last_err = None
-    for base_tpl in endpoints:
-        key_invalid_on_endpoint = False
-        for model_name in gemini_models:
-            try:
-                url = base_tpl.format(model=model_name)
-                gen_cfg: dict = {"temperature": 0.25, "maxOutputTokens": 2048}
-                if "2.5" in model_name or "3-" in model_name:
-                    gen_cfg["thinkingConfig"] = {"thinkingBudget": 256}
-                body = {
-                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": gen_cfg,
-                }
-                resp = requests.post(
-                    url,
-                    params={"key": key},
-                    headers={"Content-Type": "application/json"},
-                    json=body,
-                    timeout=18,
-                )
-                if resp.status_code == 400 and "thinkingConfig" in gen_cfg:
-                    gen_cfg.pop("thinkingConfig", None)
-                    resp = requests.post(
-                        url,
-                        params={"key": key},
-                        headers={"Content-Type": "application/json"},
-                        json=body,
-                        timeout=18,
-                    )
-                if resp.status_code == 200:
-                    text = _extract_gemini_text(resp.json())
-                    if text:
-                        return text, "Gemini · Live"
-                    last_err = f"{model_name} returned empty response"
-                else:
-                    err_json = resp.json() if resp.content else {}
-                    msg = err_json.get("error", {}).get("message", f"HTTP {resp.status_code}")
-                    last_err = msg
-                    if resp.status_code in (400, 401, 403) and ("API key not valid" in msg or "API_KEY_INVALID" in str(err_json)):
-                        key_invalid_on_endpoint = True
-                        break
-            except Exception as exc:
-                last_err = str(exc)
-        if not key_invalid_on_endpoint:
-            break
-    return None, last_err
 
 def _build_reasoning_trace(
     question: str,
@@ -417,8 +142,6 @@ def generate_explainability_response(
     origin_df: pd.DataFrame,
     briefing: dict,
     selected_origin: pd.Timestamp,
-    api_key: str | None = None,
-    preferred_model: str = "gemini-2.5-pro",
     ui_context: dict | None = None,
     chat_history: list[dict] | None = None,
 ) -> dict:
@@ -428,8 +151,6 @@ def generate_explainability_response(
         origin_df=origin_df,
         briefing=briefing,
         selected_origin=selected_origin,
-        api_key=api_key,
-        preferred_model=preferred_model,
         ui_context=ui_context,
         chat_history=chat_history,
     )
@@ -456,12 +177,11 @@ def _generate_explainability_response_core(
     origin_df: pd.DataFrame,
     briefing: dict,
     selected_origin: pd.Timestamp,
-    api_key: str | None = None,
-    preferred_model: str = "gemini-2.0-flash",
     ui_context: dict | None = None,
     chat_history: list[dict] | None = None,
 ) -> dict:
     """Return context-aware AI response answering the exact user question in German or English."""
+    del chat_history
     matched_rows, matched_label = _extract_requested_hour_rows(question, origin_df)
     driver_weights = compute_horizon_driver_weights(origin_df, matched_rows)
     is_de = _is_german_query(question)
@@ -471,41 +191,9 @@ def _generate_explainability_response_core(
     origin_pos = ui.get("origin_pos_str", "1 / 673")
     cutoff_str = ui.get("cutoff_str", selected_origin.strftime("%Y-%m-%d %H:%M:%SZ"))
 
-    effective_key = (api_key or "").strip() or _discover_env_api_key()
-    api_error_note = ""
-
-    # 1. Try Live LLM (Gemini 2.0/2.5 Flash/Pro, GPT-4o, or Llama 3.3 70B) if API key is present
-    if effective_key:
-        prompt = _build_grounded_context_prompt(
-            question=question,
-            origin_df=origin_df,
-            briefing=briefing,
-            selected_origin=selected_origin,
-            ui_context=ui_context,
-            chat_history=chat_history,
-        )
-        llm_text, model_or_err = _call_llm_api(prompt, effective_key, preferred_model=preferred_model)
-        if llm_text:
-            return {
-                "markdown": llm_text,
-                "driver_weights": driver_weights,
-                "source": model_or_err or "Gemini · Live",
-            }
-        if model_or_err:
-            if is_de:
-                api_error_note = (
-                    f"> ⚠️ **API-Key-Hinweis:** Live-LLM-Aufruf nicht möglich (*{model_or_err}*). "
-                    f"Antwort wird über die lokale TreeSHAP-Engine berechnet:\n\n"
-                )
-            else:
-                api_error_note = (
-                    f"> ⚠️ **API Key Note:** Live LLM call did not succeed (*{model_or_err}*). "
-                    f"Showing local TreeSHAP & data engine analysis below:\n\n"
-                )
-
     def _pack(md_body: str, drvs: list[dict], src: str) -> dict:
         return {
-            "markdown": api_error_note + md_body,
+            "markdown": md_body,
             "driver_weights": drvs,
             "source": src,
         }
@@ -918,7 +606,7 @@ def _generate_explainability_response_core(
         return _pack(md, driver_weights, "Decision Support")
 
     # --- Topic K: Buttons, Toggles, Controls & UI Elements ---
-    if any(k in q_low for k in ("button", "knopf", "toggle", "schalter", "zahnrad", "gear", "settings", "einstellung", "dark mode", "light mode", "hindsight", "json", "download", "api payload", "reasoning", "gedankengang")):
+    if any(k in q_low for k in ("button", "knopf", "toggle", "schalter", "dark mode", "light mode", "hindsight", "json", "download", "api payload", "reasoning", "gedankengang")):
         if is_de:
             md = (
                 "**Alle Buttons, Schalter & Bedienelemente der Website**\n\n"
@@ -931,7 +619,6 @@ def _generate_explainability_response_core(
                 "  * **🤖 Show AI Explainability Chat:** Blendet die rechte KI-Spalte ein/aus.\n"
                 "  * **🎯 Overlay Actual Prices (Hindsight):** Blendet die echten historischen Preise (grüne gepunktete Linie) im Graphen ein.\n"
                 "* **AI Assistant (Rechts):**\n"
-                "  * **⚙️ Zahnrad-Button (oben rechts):** Öffnet Modell-Auswahl (`gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`), API-Key-Feld und `🗑️ Clear Chat History`.\n"
                 "  * **✨ Quick Questions (4 Schnellfragen):** *Drivers at Peak*, *Spike Risk Summary*, *Change vs. t−1h*, *Review Actions*.\n"
                 "  * **🧠 Show Model Reasoning:** Zeigt den 4-stufigen Gedankengang (*Chain-of-Thought*) der KI über jeder Antwort an."
             )
@@ -947,7 +634,6 @@ def _generate_explainability_response_core(
                 "  * **🤖 Show AI Explainability Chat:** Shows or hides the right-hand AI panel.\n"
                 "  * **🎯 Overlay Actual Prices (Hindsight):** Overlays realized ground-truth prices (green dotted line) on the fan chart.\n"
                 "* **AI Assistant (Right Panel):**\n"
-                "  * **⚙️ Gear Button (Top Right):** Opens AI model selector (`gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`), masked API key input, and `🗑️ Clear Chat History`.\n"
                 "  * **✨ Quick Questions:** 4 one-click operational prompts.\n"
                 "  * **🧠 Show Model Reasoning:** Toggles the step-by-step Chain-of-Thought reasoning trace above each answer."
             )

@@ -501,22 +501,6 @@ KB_ENTRIES: list[dict] = [
     },
     # ======================= 9. AI ASSISTANT CONTROLS =======================
     {
-        "id": "gear",
-        "keywords": ["gear", "zahnrad", "⚙", "settings", "einstellungen", "api key", "api-key", "api schlüssel", "clear chat", "chat löschen", "which model", "welches modell", "ai model"],
-        "en": ("⚙️ AI Assistant Settings (Gear Button)",
-               "The gear in the top-right of the AI box opens:\n"
-               "* **AI model selector** – `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash` (GPT-4o / Llama 3.3 also supported via key).\n"
-               "* **API key field** (masked, not stored by the browser password manager).\n"
-               "* **🗑️ Clear Chat History**.\n\n"
-               "Without a key the built-in, bilingual knowledge engine answers all website questions."),
-        "de": ("⚙️ KI-Einstellungen (Zahnrad-Button)",
-               "Das Zahnrad oben rechts in der KI-Box öffnet:\n"
-               "* **KI-Modell-Auswahl** – `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash` (GPT-4o / Llama 3.3 ebenfalls per Key möglich).\n"
-               "* **API-Key-Feld** (maskiert, wird nicht vom Browser-Passwortmanager gespeichert).\n"
-               "* **🗑️ Clear Chat History**.\n\n"
-               "Ohne Key beantwortet die eingebaute, zweisprachige Wissens-Engine alle Fragen zur Website."),
-    },
-    {
         "id": "quick_questions",
         "keywords": ["quick question", "schnellfrage", "vorgefertigte frage", "predefined question", "preset question"],
         "en": ("✨ Quick Questions",
@@ -579,11 +563,3 @@ def render_kb_entry(entry: dict, is_de: bool, ctx: dict) -> str:
     return f"**{title}**\n\n{body_txt}"
 
 
-def kb_digest_for_llm() -> str:
-    """Compact English digest of every UI element, injected into live LLM prompts."""
-    lines = []
-    for e in KB_ENTRIES:
-        title, body = e["en"]
-        clean = re.sub(r"\{[a-z_]+(?::[^}]*)?\}", "<live>", body).replace("\n", " ")
-        lines.append(f"- {title}: {clean}")
-    return "\n".join(lines)

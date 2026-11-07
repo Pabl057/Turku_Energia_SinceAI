@@ -297,45 +297,14 @@ def _render_chat_sidebar(
     with st.container(border=True, key="te_ai_outer_box"):
         st.markdown("<div id='te-ai-window-marker' style='display:none;'></div>", unsafe_allow_html=True)
 
-        # Header Row: Title on Left + Discreet Gear Settings Popover Button on Top-Right
-        hdr_left, hdr_right = st.columns([5.6, 1.0], gap="small")
-        with hdr_left:
-            st.markdown(
-                """
-                <div style="padding-top:0.15rem; margin-bottom:0.35rem;">
-                  <h3 class="te-section-title" style="font-size:1.25rem; margin:0;">🤖 AI Assistant<span>.</span></h3>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with hdr_right:
-            with st.popover("⚙️", help="AI Settings: API Key & Reset Chat"):
-                st.markdown("**⚙️ AI Assistant Settings**")
-                with st.form("te_api_key_form", border=False):
-                    key_val = st.text_input(
-                        "API Key (Google AI Studio, OpenAI, Groq, or Claude)",
-                        value=st.session_state.get("saved_llm_api_key", ""),
-                        type="default",
-                        placeholder="Paste your API key here...",
-                        help="Provider and best model are selected automatically.",
-                        key="gemini_api_key_input",
-                    )
-                    saved_click = st.form_submit_button("💾 Save API Key", type="primary", use_container_width=True)
-                    if saved_click:
-                        st.session_state.saved_llm_api_key = (key_val or "").strip()
-                active_key_now = (
-                    st.session_state.get("saved_llm_api_key")
-                    or st.session_state.get("gemini_api_key_input")
-                    or ""
-                ).strip()
-                if active_key_now:
-                    st.session_state.saved_llm_api_key = active_key_now
-                    st.caption(f"🟢 **Live API Key active** (`{active_key_now[:4]}...`)")
-                else:
-                    st.caption("⚪ **Built-in Local Engine active** (paste key above for live LLM)")
-                if st.button("🗑️ Clear Chat History", use_container_width=True):
-                    st.session_state.te_chat_messages = st.session_state.te_chat_messages[:1]
-                    st.rerun()
+        st.markdown(
+            """
+            <div style="padding-top:0.15rem; margin-bottom:0.35rem;">
+              <h3 class="te-section-title" style="font-size:1.25rem; margin:0;">🤖 AI Assistant<span>.</span></h3>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         # 1. TOP: Scrollable Chat History Container
         chat_box = st.container(height=500, border=True, key="te_ai_chat_box")
 
@@ -388,8 +357,6 @@ def _render_chat_sidebar(
                 origin_df=origin_df,
                 briefing=briefing,
                 selected_origin=selected_origin,
-                api_key=st.session_state.get("saved_llm_api_key") or st.session_state.get("gemini_api_key_input", ""),
-                preferred_model=st.session_state.get("preferred_llm_model", "gemini-2.0-flash"),
                 ui_context=ui_context,
                 chat_history=prior_history,
             )
