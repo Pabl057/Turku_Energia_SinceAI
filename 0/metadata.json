@@ -1,0 +1,44 @@
+{
+  "cli_version": "0.13.1",
+  "checkpoint_id": "01M6T2RDDF01KS4VBF069Y972X",
+  "session_id": "8eebf1e6-87ea-458f-861c-bb16b9cd3ddd",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T04:02:39.080204Z",
+  "branch": "feat/lgbm-pipeline",
+  "checkpoints_count": 7,
+  "save_step_count": 3,
+  "files_touched": [
+    "apps/dashboard.py",
+    "forecast_backtest.csv",
+    "src/models/forecaster.py"
+  ],
+  "agent": "Antigravity",
+  "model": "",
+  "turn_id": "d886235aed2f",
+  "checkpoint_transcript_start": 206,
+  "transcript_lines_at_start": 206,
+  "token_usage": {
+    "input_tokens": 32575,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 3108864,
+    "output_tokens": 24362,
+    "api_call_count": 16
+  },
+  "redaction": {
+    "replacements": 1,
+    "layers": {
+      "betterleaks": 1,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 15
+  }
+}
