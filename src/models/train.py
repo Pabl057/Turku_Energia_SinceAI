@@ -72,6 +72,7 @@ class ImbalanceModelSuite:
     m_spike_low: lgb.LGBMClassifier
     cutoff_origin_utc: pd.Timestamp
     reg_feature_cols: list[str] | None = None
+    m_p50_deep: lgb.LGBMRegressor | None = None
     m_p50_short: lgb.LGBMRegressor | None = None
     m_dir_short: lgb.LGBMClassifier | None = None
     prior_up: float = 0.35
@@ -82,6 +83,7 @@ class ImbalanceModelSuite:
     conformal_shift_lo: float = -0.5
     conformal_shift_hi: float = 7.0
     spike_clf_weight: float = 0.45
+    spike_dir_coupling: float = 0.18
     def compute_shap_values(self, X: pd.DataFrame) -> np.ndarray:
         """Compute exact TreeSHAP values for the P50 spread model (via shap.TreeExplainer or native C++ TreeSHAP)."""
         reg_cols = self.reg_feature_cols or self.feature_cols
@@ -128,7 +130,12 @@ class ImbalanceModelSuite:
         spot = df_features["spot_at_delivery"].to_numpy(dtype=float)
         steps = df_features["step"].to_numpy(dtype=float)
 
-        sp50_full = np.asarray(self.m_p50.predict(X_reg), dtype=float)
+        sp50_base = np.asarray(self.m_p50.predict(X_reg), dtype=float)
+        if self.m_p50_deep is not None:
+            sp50_deep = np.asarray(self.m_p50_deep.predict(X_reg), dtype=float)
+            sp50_full = 0.60 * sp50_base + 0.40 * sp50_deep
+        else:
+            sp50_full = sp50_base
         if self.m_p50_short is not None:
             sp50_short = np.asarray(self.m_p50_short.predict(X), dtype=float)
             w_p50_sh = np.where(steps <= 4, 0.55, np.where(steps <= 8, 0.25, 0.0))
@@ -184,6 +191,15 @@ class ImbalanceModelSuite:
         w = self.spike_clf_weight
         p_spike_high = w * c_hi + (1.0 - w) * q_hi
         p_spike_low = w * c_lo + (1.0 - w) * q_lo
+
+        # Physical regime coupling (Lever A): positive price spikes (> spot + 50) require
+        # upward regulation (deficit), while negative spikes (< spot - 50) require downward regulation.
+        if self.spike_dir_coupling > 0.0:
+            b = self.spike_dir_coupling
+            ref_up = max(self.prior_up, 0.20)
+            ref_dn = max(self.prior_down, 0.20)
+            p_spike_high = np.clip(p_spike_high * (1.0 + b * (p_up - ref_up) / ref_up), 0.0, 1.0)
+            p_spike_low = np.clip(p_spike_low * (1.0 + b * (p_down - ref_dn) / ref_dn), 0.0, 1.0)
 
         if include_shap:
             top_drivers, _ = self.top_drivers_for_frame(X, top_k=3)
@@ -313,6 +329,20 @@ def train_model_suite(
         n_jobs=4,
         verbose=-1,
     )
+    deep_reg_params: dict[str, Any] = dict(
+        learning_rate=0.02,
+        num_leaves=15,
+        min_child_samples=200,
+        n_estimators=310,
+        subsample=0.75,
+        subsample_freq=1,
+        colsample_bytree=0.55,
+        reg_alpha=5.0,
+        reg_lambda=25.0,
+        random_state=RANDOM_SEED + 101,
+        n_jobs=4,
+        verbose=-1,
+    )
     short_reg_params: dict[str, Any] = dict(
         learning_rate=0.03,
         num_leaves=23,
@@ -357,6 +387,7 @@ def train_model_suite(
     )
 
     m_p50 = lgb.LGBMRegressor(objective="regression_l1", **reg_params)
+    m_p50_deep = lgb.LGBMRegressor(objective="regression_l1", **deep_reg_params)
     m_p10 = lgb.LGBMRegressor(objective="quantile", alpha=0.10, **reg_params)
     m_p90 = lgb.LGBMRegressor(objective="quantile", alpha=0.90, **reg_params)
     m_dir = lgb.LGBMClassifier(objective="multiclass", num_class=3, **clf_params)
@@ -370,6 +401,7 @@ def train_model_suite(
         reg_time_mask = np.ones(len(tr), dtype=bool)
 
     m_p50.fit(X_tr_reg.loc[reg_time_mask], y_spread[reg_time_mask], sample_weight=sample_weight[reg_time_mask])
+    m_p50_deep.fit(X_tr_reg.loc[reg_time_mask], y_spread[reg_time_mask], sample_weight=sample_weight[reg_time_mask])
     m_p10.fit(X_tr_reg.loc[reg_time_mask], y_spread[reg_time_mask], sample_weight=sample_weight[reg_time_mask])
     m_p90.fit(X_tr_reg.loc[reg_time_mask], y_spread[reg_time_mask], sample_weight=sample_weight[reg_time_mask])
     m_dir.fit(X_tr, y_dir, sample_weight=sample_weight)
@@ -396,6 +428,7 @@ def train_model_suite(
         feature_cols=feature_cols,
         reg_feature_cols=reg_feature_cols,
         m_p50=m_p50,
+        m_p50_deep=m_p50_deep,
         m_p10=m_p10,
         m_p90=m_p90,
         m_dir=m_dir,
